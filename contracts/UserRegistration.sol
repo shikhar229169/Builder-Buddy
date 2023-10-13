@@ -26,7 +26,7 @@ contract UserRegistration is FunctionsClient {
     struct Customer {
         address ethAddress;
         string name;
-        bytes12[] worksRequested;
+        uint256[] worksRequested;
     }
 
     struct Contractor {
@@ -35,7 +35,7 @@ contract UserRegistration is FunctionsClient {
         uint256 score;
         uint8 level;
         uint256 totalCollateralDeposited;
-        bytes12[] usersRequests;
+        uint256[] acceptedContracts;
         // Specialization
     }
 
@@ -128,7 +128,7 @@ contract UserRegistration is FunctionsClient {
                     customers[userInfo.userId] = Customer({
                         ethAddress: userInfo.ethAddress,
                         name: userInfo.name,
-                        worksRequested: new bytes12[](0)
+                        worksRequested: new uint256[](0)
                     });
                 }
                 else if (userInfo.role == Role.CONTRACTOR) {
@@ -138,7 +138,7 @@ contract UserRegistration is FunctionsClient {
                         score: 0,
                         level: 1,
                         totalCollateralDeposited: 0,
-                        usersRequests: new bytes12[](0)
+                        acceptedContracts: new uint256[](0)
                     });
                 }
 
