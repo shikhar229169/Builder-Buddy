@@ -14,9 +14,29 @@ contract UserRegistration is FunctionsClient {
         CONTRACTOR
     }
 
+    // for setting up users info corresponding to request id for chainlink functions
     struct UserRequestInfo {
-        address user;
+        bytes32 userId;
+        address ethAddress;
         Role role;
+        string name;
+    }
+
+    // mapped with userId
+    struct Customer {
+        address ethAddress;
+        string name;
+        bytes32[] worksRequested;
+    }
+
+    struct Contractor {
+        address ethAddress;
+        string name;
+        uint256 score;
+        uint8 level;
+        uint256 totalCollateralDeposited;
+        bytes32[] usersRequests;
+        // Specialization
     }
 
     // Errors
@@ -37,9 +57,8 @@ contract UserRegistration is FunctionsClient {
     address public owner;
 
 
-
-    mapping(address user => Role role) public userToRole;
-
+    mapping(bytes32 userId => Customer) public customers;
+    mapping(bytes32 userId => Contractor) public contractors;
 
 
     // Testing
@@ -47,8 +66,8 @@ contract UserRegistration is FunctionsClient {
     string public errror;
 
     // Events
-    event Registered(address indexed user, Role indexed role);
-    event RegistrationUnsuccessful(address indexed user, uint256 indexed score);
+    event Registered(bytes32 indexed userId, address indexed ethAddress, Role indexed role);
+    event RegistrationUnsuccessful(address indexed ethAddress, uint256 indexed score);
     
     modifier onlyOwner() {
         if (msg.sender != owner) {
@@ -69,14 +88,9 @@ contract UserRegistration is FunctionsClient {
     }
 
     function register(bytes32 userId, Role role, string memory name) external {
-        // if (role == Role.NO_ROLE) {
-        //     revert();
-        // }
-
-        // if (userToRole[msg.sender] != Role.NO_ROLE) {
-        //     revert UserRegistration__AlreadyRegistered();
-        // }
-
+        if (customers[userId].ethAddress != address(0)) {
+            revert UserRegistration__AlreadyRegistered();
+        }
 
         // get the scorer id, user address, and api key for gitcoin
         // Then place an api call to check if the score is satisfied via chainlink functions
@@ -92,16 +106,9 @@ contract UserRegistration is FunctionsClient {
         req.addSecretsReference(secrets);
 
         bytes32 reqId = _sendRequest(req.encodeCBOR(), subscriptionId, gasLimit, donId);
-        reqIdToUserInfo[reqId] = UserRequestInfo(msg.sender, role);
+        reqIdToUserInfo[reqId] = UserRequestInfo(userId, msg.sender, role, name);
     }
 
-    function setSecrets(bytes memory newSecrets) external onlyOwner {
-        secrets = newSecrets;
-    }
-
-    function setSubId(uint64 newSubId) external onlyOwner {
-        subscriptionId = newSubId;
-    }
 
     function fulfillRequest(
         bytes32 requestId,
@@ -111,20 +118,51 @@ contract UserRegistration is FunctionsClient {
         UserRequestInfo memory userInfo = reqIdToUserInfo[requestId];
         success = response;
         errror = string(err);
+
         if (response.length > 0) {
             uint256 score = abi.decode(response, (uint256));
             if (score >= minimumScore) {
                 // Registration Successful
-                userToRole[userInfo.user] = userInfo.role;
+                
+                if (userInfo.role == Role.CUSTOMER) {
+                    customers[userInfo.userId] = Customer({
+                        ethAddress: userInfo.ethAddress,
+                        name: userInfo.name,
+                        worksRequested: new bytes32[](0)
+                    });
+                }
+                else if (userInfo.role == Role.CONTRACTOR) {
+                    contractors[userInfo.userId] = Contractor({
+                        ethAddress: userInfo.ethAddress,
+                        name: userInfo.name,
+                        score: 0,
+                        level: 1,
+                        totalCollateralDeposited: 0,
+                        usersRequests: new bytes32[](0)
+                    });
+                }
 
-                emit Registered(userInfo.user, userInfo.role);
+                emit Registered(userInfo.userId, userInfo.ethAddress, userInfo.role);
             }
             else {
-                emit RegistrationUnsuccessful(userInfo.user, score);
+                emit RegistrationUnsuccessful(userInfo.ethAddress, score);
             }
         }
         else {
-            emit RegistrationUnsuccessful(userInfo.user, 0);
+            emit RegistrationUnsuccessful(userInfo.ethAddress, 0);
         }
+    }
+
+
+
+
+
+
+    function setSecrets(bytes memory newSecrets) external onlyOwner {
+        secrets = newSecrets;
+    }
+
+    function setSubId(uint64 newSubId) external onlyOwner {
+        subscriptionId = newSubId;
     }
 }
