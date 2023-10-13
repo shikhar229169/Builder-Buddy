@@ -34,8 +34,10 @@ contract UserRegistration is FunctionsClient {
         string name;
         uint256 score;
         uint8 level;
+        bool isAssigned;
         uint256 totalCollateralDeposited;
         uint256[] acceptedContracts;
+        
         // Specialization
     }
 
@@ -137,6 +139,7 @@ contract UserRegistration is FunctionsClient {
                         name: userInfo.name,
                         score: 0,
                         level: 1,
+                        isAssigned: false,
                         totalCollateralDeposited: 0,
                         acceptedContracts: new uint256[](0)
                     });
@@ -152,11 +155,6 @@ contract UserRegistration is FunctionsClient {
             emit RegistrationUnsuccessful(userInfo.ethAddress, 0);
         }
     }
-
-
-
-
-
 
     function setSecrets(bytes memory newSecrets) external onlyOwner {
         secrets = newSecrets;
