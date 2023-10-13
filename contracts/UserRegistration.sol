@@ -16,7 +16,7 @@ contract UserRegistration is FunctionsClient {
 
     // for setting up users info corresponding to request id for chainlink functions
     struct UserRequestInfo {
-        bytes32 userId;
+        bytes12 userId;
         address ethAddress;
         Role role;
         string name;
@@ -26,7 +26,7 @@ contract UserRegistration is FunctionsClient {
     struct Customer {
         address ethAddress;
         string name;
-        bytes32[] worksRequested;
+        bytes12[] worksRequested;
     }
 
     struct Contractor {
@@ -35,7 +35,7 @@ contract UserRegistration is FunctionsClient {
         uint256 score;
         uint8 level;
         uint256 totalCollateralDeposited;
-        bytes32[] usersRequests;
+        bytes12[] usersRequests;
         // Specialization
     }
 
@@ -57,8 +57,8 @@ contract UserRegistration is FunctionsClient {
     address public owner;
 
 
-    mapping(bytes32 userId => Customer) public customers;
-    mapping(bytes32 userId => Contractor) public contractors;
+    mapping(bytes12 userId => Customer) public customers;
+    mapping(bytes12 userId => Contractor) public contractors;
 
 
     // Testing
@@ -66,7 +66,7 @@ contract UserRegistration is FunctionsClient {
     string public errror;
 
     // Events
-    event Registered(bytes32 indexed userId, address indexed ethAddress, Role indexed role);
+    event Registered(bytes12 indexed userId, address indexed ethAddress, Role indexed role);
     event RegistrationUnsuccessful(address indexed ethAddress, uint256 indexed score);
     
     modifier onlyOwner() {
@@ -87,8 +87,8 @@ contract UserRegistration is FunctionsClient {
         owner = msg.sender;
     }
 
-    function register(bytes32 userId, Role role, string memory name) external {
-        if (customers[userId].ethAddress != address(0)) {
+    function register(bytes12 userId, Role role, string memory name) external {
+        if (customers[userId].ethAddress != address(0) || contractors[userId].ethAddress != address(0)) {
             revert UserRegistration__AlreadyRegistered();
         }
 
@@ -128,7 +128,7 @@ contract UserRegistration is FunctionsClient {
                     customers[userInfo.userId] = Customer({
                         ethAddress: userInfo.ethAddress,
                         name: userInfo.name,
-                        worksRequested: new bytes32[](0)
+                        worksRequested: new bytes12[](0)
                     });
                 }
                 else if (userInfo.role == Role.CONTRACTOR) {
@@ -138,7 +138,7 @@ contract UserRegistration is FunctionsClient {
                         score: 0,
                         level: 1,
                         totalCollateralDeposited: 0,
-                        usersRequests: new bytes32[](0)
+                        usersRequests: new bytes12[](0)
                     });
                 }
 
