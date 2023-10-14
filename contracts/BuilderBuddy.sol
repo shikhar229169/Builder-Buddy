@@ -2,12 +2,13 @@
 
 pragma solidity 0.8.19;
 
-import { UserRegistration } from "./UserRegistration.sol";
+import {UserRegistration} from "./UserRegistration.sol";
 
 contract BuilderBuddy is UserRegistration {
     // Enums
     enum Status {
         PENDING,
+        ASSIGNED,
         REJECTED,
         FINISHED
     }
@@ -20,7 +21,7 @@ contract BuilderBuddy is UserRegistration {
         string locality;
         uint256 budget;
         uint256 expectedStartDate;
-        // Status status;
+        Status status;
         uint256 timestamp;
         address contractor;
         address taskContract;
@@ -35,16 +36,24 @@ contract BuilderBuddy is UserRegistration {
 
     // State Variables
     uint256 private orderCounter;
-    mapping (uint256 orderId => CustomerOrder order) private orders;
+    mapping(uint256 orderId => CustomerOrder order) private orders;
 
     // Events
     event OrderCreated(address indexed customer, uint256 indexed orderId, string title);
     event ContractorAssigned(uint256 indexed orderId, address indexed contractor);
+    event OrderConfirmed(uint256 indexed orderId, address indexed contractor);
 
     // Modifiers
     modifier onlyCustomer(bytes12 userId) {
         if (customers[userId].ethAddress != msg.sender) {
             revert BuilderBuddy__InvalidCustomer();
+        }
+        _;
+    }
+
+    modifier isContractorAssigned(bytes12 contractorUserId) {
+        if (contractors[contractorUserId].isAssigned) {
+            revert BuilderBuddy__ContractorAlreadySet();
         }
         _;
     }
@@ -57,14 +66,30 @@ contract BuilderBuddy is UserRegistration {
     }
 
     // Constructor
-    constructor(address router, uint256 _minimumScore, string memory _scorerId, string memory _source, uint64 _subscriptionId, uint32 _gasLimit, bytes memory _secrets, string memory donName) UserRegistration(router, _minimumScore, _scorerId, _source, _subscriptionId, _gasLimit, _secrets, donName) {
+    constructor(
+        address router,
+        uint256 _minimumScore,
+        string memory _scorerId,
+        string memory _source,
+        uint64 _subscriptionId,
+        uint32 _gasLimit,
+        bytes memory _secrets,
+        string memory donName
+    ) UserRegistration(router, _minimumScore, _scorerId, _source, _subscriptionId, _gasLimit, _secrets, donName) {
         orderCounter = 0;
     }
 
     // FUNCTIONS
 
     // should we add category for an order??
-    function createOrder(bytes12 userId, string memory title, string memory desc, string memory locality, uint256 budget, uint256 expectedStartDate) external onlyCustomer(userId) {
+    function createOrder(
+        bytes12 userId,
+        string memory title,
+        string memory desc,
+        string memory locality,
+        uint256 budget,
+        uint256 expectedStartDate
+    ) external onlyCustomer(userId) {
         uint256 orderId = orderCounter;
         orderCounter++;
 
@@ -75,6 +100,7 @@ contract BuilderBuddy is UserRegistration {
             locality: locality,
             budget: budget,
             expectedStartDate: expectedStartDate,
+            status: Status.PENDING,
             timestamp: block.timestamp,
             contractor: address(0),
             taskContract: address(0)
@@ -85,7 +111,12 @@ contract BuilderBuddy is UserRegistration {
         emit OrderCreated(msg.sender, orderId, title);
     }
 
-    function assignContractorToOrder(bytes12 userId, uint256 orderId, bytes12 contractorId) external onlyCustomer(userId) {
+    // if contractor is already assigned, then contractor can't be assigned to another order
+    function assignContractorToOrder(bytes12 userId, uint256 orderId, bytes12 contractorId)
+        external
+        onlyCustomer(userId)
+        isContractorAssigned(contractorId)
+    {
         if (orders[orderId].customer != msg.sender) {
             revert BuilderBuddy__CallerNotOwnerOfOrder();
         }
@@ -105,7 +136,20 @@ contract BuilderBuddy is UserRegistration {
         emit ContractorAssigned(orderId, appointedContractorAddress);
     }
 
-    function confirmUserOrder(bytes12 userId, uint256 orderId) external onlyContractor(userId) {
+    function confirmUserOrder(bytes12 contractorUserId, uint256 orderId) external onlyContractor(contractorUserId) isContractorAssigned(contractorUserId) {
+        if (orders[orderId].contractor != msg.sender) {
+            revert BuilderBuddy__CallerNotOwnerOfOrder();
+        }
 
+        if (orders[orderId].status != Status.PENDING) {
+            revert BuilderBuddy__ContractorAlreadySet();
+        }
+
+        orders[orderId].status = Status.ASSIGNED;
+
+        contractors[contractorUserId].isAssigned = true;
+        contractors[contractorUserId].acceptedContracts.push(orderId);
+        
+        emit OrderConfirmed(orderId, msg.sender);
     }
 }
