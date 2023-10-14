@@ -115,7 +115,7 @@ contract BuilderBuddy is UserRegistration {
     function assignContractorToOrder(bytes12 userId, uint256 orderId, bytes12 contractorId)
         external
         onlyCustomer(userId)
-        isContractorAssigned(userId)
+        isContractorAssigned(contractorId)
     {
         if (orders[orderId].customer != msg.sender) {
             revert BuilderBuddy__CallerNotOwnerOfOrder();
