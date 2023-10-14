@@ -5,6 +5,8 @@ pragma solidity 0.8.19;
 import { UserRegistration } from "./UserRegistration.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
+/// @title Builder Buddy Smart Contract
+/// @notice This contract manages users registration and orders
 contract BuilderBuddy is UserRegistration {
     // Enums
     enum Status {
@@ -119,6 +121,10 @@ contract BuilderBuddy is UserRegistration {
 
     // FUNCTIONS
 
+    /**
+     * @dev Allows contractor to stake usdc to increment their level
+     * @param contractorUserId The contractor's user id
+    */
     function stakeUSDC(bytes12 contractorUserId) external onlyContractor(contractorUserId) {
         Contractor memory cont = contractors[contractorUserId];
 
@@ -144,6 +150,15 @@ contract BuilderBuddy is UserRegistration {
 
 
     // should we add category for an order??
+    /**
+     * @dev Allows customer to create an order
+     * @param userId The customer's user id
+     * @param title The title of the order
+     * @param desc The description of the order
+     * @param locality The locality of the order
+     * @param budget The budget of the customer for the work
+     * @param expectedStartDate The expected start date of the work
+    */
     function createOrder(
         bytes12 userId,
         string memory title,
@@ -174,7 +189,13 @@ contract BuilderBuddy is UserRegistration {
         emit OrderCreated(msg.sender, orderId, title);
     }
 
-    // if contractor is already assigned, then contractor can't be assigned to another order
+    /**
+     * @dev Allows customer to assign a contractor to their order
+     * @param userId The customer's user id
+     * @param orderId The customer's order id
+     * @param contractorId The contractor's user id
+     * @notice if contractor is already assigned, then contractor can't be assigned to another order
+    */
     function assignContractorToOrder(bytes12 userId, uint256 orderId, bytes12 contractorId)
         external
         onlyCustomer(userId)
@@ -204,6 +225,13 @@ contract BuilderBuddy is UserRegistration {
         emit ContractorAssigned(orderId, appointedContractorAddress);
     }
 
+    /**
+     * @dev Allows contractor to confirm the order, when customer assigns them to the order
+     * @dev Also deploys a dedicated task manager contract which handles all the payments and work logs
+     * @notice 2 way txn process to confirm the order by both customer and contractor0
+     * @param contractorUserId The contractor's user id
+     * @param orderId The customer's order id
+    */
     function confirmUserOrder(bytes12 contractorUserId, uint256 orderId) external onlyContractor(contractorUserId) isContractorValid(contractorUserId) {
         if (orders[orderId].contractor != msg.sender) {
             revert BuilderBuddy__CallerNotOwnerOfOrder();
@@ -224,6 +252,11 @@ contract BuilderBuddy is UserRegistration {
         emit OrderConfirmed(orderId, msg.sender);
     }
 
+    /**
+     * @dev Mark the order as confirmed upon confirmation by customer
+     * @notice This is called by Task Manager Contract by a function which is called by customer
+     * @param orderId The customer's order id
+    */
     function markOrderAsCompleted(uint256 orderId) external {
         // only callable by task manager contract
         if (msg.sender != orders[orderId].taskContract) {
@@ -236,6 +269,12 @@ contract BuilderBuddy is UserRegistration {
         contractors[order.contractorId].isAssigned = false;
     }
 
+    /**
+     * @dev Allows contractor to unstake their USDC deposited
+     * @notice Assigns the respective level to the contractor based on the remaining amount
+     * @param contractorUserId The user id of the contractor
+     * @param amount Amount of USDC to withdraw
+    */
     function withdrawStakedUSDC(bytes12 contractorUserId, uint256 amount) external onlyContractor(contractorUserId) isContractorValid(contractorUserId) {
         if (amount == 0) {
             revert BuilderBuddy__AmountIsZero();
@@ -266,10 +305,34 @@ contract BuilderBuddy is UserRegistration {
         contractors[contractorUserId].level = level;
     }
 
+    /**
+     * @dev Returns the order details corresponding to order id
+     * @param orderId The order id of the customer's order
+     */
     function getOrder(uint256 orderId) external view returns (CustomerOrder memory) {
         return orders[orderId];
     }
 
+    /**
+     * @dev Returns all the orders placed by a customer
+     * @return An array of Order struct, containing details about every order
+     * @param customerUserId The user id of customer
+     */
+    function getAllCustomerOrders(bytes12 customerUserId) external view returns (CustomerOrder[] memory) {
+        uint256[] memory customerOrderIds = customers[customerUserId].worksRequested;
+        uint256 orderLength = customerOrderIds.length;
+        CustomerOrder[] memory customerOrders = new CustomerOrder[](orderLength);
+
+        for (uint256 i = 0; i < orderLength; i++) {
+            customerOrders[i] = orders[customerOrderIds[i]];
+        }
+
+        return customerOrders;
+    }
+
+    /**
+     * @notice Returns all the orders placed by customers
+    */
     function getAllOrders() external view returns (CustomerOrder[] memory) {
         CustomerOrder[] memory currOrder = new CustomerOrder[](orderCounter);
 
@@ -280,10 +343,18 @@ contract BuilderBuddy is UserRegistration {
         return currOrder;
     }
 
+    /**
+     * @dev Returns the usdc address used for staking and payments
+     */
     function getUsdcAddress() external view returns (address) {
         return address(i_usdc);
     }
 
+    /**
+     * @dev Returns the collateral required to be deposited for a level
+     * @notice Level 1 is the lowest level and level 5 is the highest level
+     * @param level The level of the contractor
+     */
     function getRequiredCollateral(uint8 level) external view returns (uint256) {
         if (level == 0 || level > TOTAL_LEVELS) {
             revert();
@@ -292,6 +363,9 @@ contract BuilderBuddy is UserRegistration {
         return collateralRequired[level];
     }
 
+    /**
+     * @dev Returns total number of orders placed
+     */
     function getOrderCounter() external view returns (uint256) {
         return orderCounter;
     }
