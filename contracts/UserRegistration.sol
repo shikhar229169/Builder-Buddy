@@ -36,9 +36,7 @@ contract UserRegistration is FunctionsClient {
         uint8 level;
         bool isAssigned;
         uint256 totalCollateralDeposited;
-        uint256[] acceptedContracts;
-        
-        // Specialization
+        uint256[] acceptedContracts;        
     }
 
     // Errors
@@ -138,7 +136,7 @@ contract UserRegistration is FunctionsClient {
                         ethAddress: userInfo.ethAddress,
                         name: userInfo.name,
                         score: 0,
-                        level: 1,
+                        level: 0,
                         isAssigned: false,
                         totalCollateralDeposited: 0,
                         acceptedContracts: new uint256[](0)
