@@ -265,4 +265,34 @@ contract BuilderBuddy is UserRegistration {
 
         contractors[contractorUserId].level = level;
     }
+
+    function getOrder(uint256 orderId) external view returns (CustomerOrder memory) {
+        return orders[orderId];
+    }
+
+    function getAllOrders() external view returns (CustomerOrder[] memory) {
+        CustomerOrder[] memory currOrder = new CustomerOrder[](orderCounter);
+
+        for (uint256 i = 0; i < orderCounter; i++) {
+            currOrder[i] = orders[i];
+        }
+
+        return currOrder;
+    }
+
+    function getUsdcAddress() external view returns (address) {
+        return address(i_usdc);
+    }
+
+    function getRequiredCollateral(uint8 level) external view returns (uint256) {
+        if (level == 0 || level > TOTAL_LEVELS) {
+            revert();
+        }
+
+        return collateralRequired[level];
+    }
+
+    function getOrderCounter() external view returns (uint256) {
+        return orderCounter;
+    }
 }
