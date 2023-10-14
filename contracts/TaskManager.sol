@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 
-pragma solidity ^0.8.19;
+pragma solidity 0.8.19;
 
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { BuilderBuddy } from "./BuilderBuddy.sol";
 
 /// @title Task Manager Smart Contract
 /// @notice A contract for managing tasks between clients and contractors.
@@ -46,6 +47,11 @@ contract TaskManager {
      * @dev The task counter, which tracks the number of tasks created in the contract.
      */
     uint256 private s_taskCounter = 0;
+
+    /**
+     * @dev The instance of the BuilderBuddy contract
+     */
+    BuilderBuddy private builderBuddy;
 
     /**
      * @dev Represents the status of a task.
@@ -219,7 +225,8 @@ contract TaskManager {
         address _contractorAddress,
         uint8 _level,
         uint256 _collateralDeposited,
-        IERC20 _usdc
+        IERC20 _usdc,
+        address builderBuddyAddr
     ) {
         i_clientId = _clientId;
         i_contractorId = _contractorId;
@@ -228,6 +235,7 @@ contract TaskManager {
         i_level = _level;
         i_usdc = _usdc;
         i_collateralDeposited = _collateralDeposited;
+        builderBuddy = BuilderBuddy(builderBuddyAddr);
     }
 
     /**

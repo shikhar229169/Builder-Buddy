@@ -125,7 +125,7 @@ contract BuilderBuddy is UserRegistration {
      * @dev Allows contractor to stake usdc to increment their level
      * @param contractorUserId The contractor's user id
     */
-    function stakeUSDC(bytes12 contractorUserId) external onlyContractor(contractorUserId) {
+    function incrementLevelAndStakeUSDC(bytes12 contractorUserId) external onlyContractor(contractorUserId) {
         Contractor memory cont = contractors[contractorUserId];
 
         if (cont.level == TOTAL_LEVELS) {
@@ -133,7 +133,7 @@ contract BuilderBuddy is UserRegistration {
         }
 
         contractors[contractorUserId].level++;
-        if (cont.totalCollateralDeposited == collateralRequired[cont.level]) {
+        if (cont.totalCollateralDeposited >= collateralRequired[cont.level]) {
             revert BuilderBuddy__AlreadyStaked();
         }
 
@@ -146,6 +146,30 @@ contract BuilderBuddy is UserRegistration {
 
 
         contractors[contractorUserId].totalCollateralDeposited = collateralRequired[cont.level];
+    }
+
+    /**
+     * @dev Allows contractor to stake usdc
+     * @notice This is just to stake but not for incrementing their level
+     * @notice Therefore, they can only stake less than or equal to associated with their current level
+     * @param contractorUserId The user if of contractor
+     * @param amount The amount to stake
+     */
+    function stakeUSDC(bytes12 contractorUserId, uint256 amount) external onlyContractor(contractorUserId) {
+        Contractor memory contr = contractors[contractorUserId];
+
+        if ((contr.totalCollateralDeposited + amount) >= collateralRequired[contr.level]) {
+            revert BuilderBuddy__AlreadyStaked();
+        }
+
+        emit ContractorStaked(msg.sender);
+        bool success = i_usdc.transferFrom(msg.sender, address(this), amount);
+
+        if (!success) {
+            revert BuilderBuddy__StakingFailed();
+        }
+
+        contractors[contractorUserId].totalCollateralDeposited += amount;
     }
 
 
@@ -341,6 +365,18 @@ contract BuilderBuddy is UserRegistration {
         }
 
         return currOrder;
+    }
+
+    /**
+     * @dev Returns the total collateral deposited by contractor
+     * @param contractorId The user id of contractor
+     */
+    function getCollateralDeposited(bytes12 contractorId) external view returns (uint256) {
+        if (contractors[contractorId].ethAddress == address(0)) {
+            revert BuilderBuddy__ContractorNotFound();
+        }
+
+        return contractors[contractorId].totalCollateralDeposited;
     }
 
     /**
