@@ -51,7 +51,7 @@ contract BuilderBuddy is UserRegistration {
     uint256 private orderCounter;
     uint256 private constant TOTAL_LEVELS = 5;
     mapping (uint256 orderId => CustomerOrder order) private orders;
-    mapping (uint8 level => uint256 collateralNeeded) private collateralRequired;
+    mapping (uint8 level => uint256 collateralNeeded) private collateralRequired;  // MAKE A CHANGE HERE TO ADD STRUCT FOR COLLATERAL AS WELL AS SCORE, ALSO ADD MIN ELIGIBLE LEVEL (NOT NEC. REQ AS WE CAN GET IT VIA THEIR SCORE BY LOOPING)
     IERC20 private immutable i_usdc;
 
     // Events
@@ -128,6 +128,8 @@ contract BuilderBuddy is UserRegistration {
     function incrementLevelAndStakeUSDC(bytes12 contractorUserId) external onlyContractor(contractorUserId) {
         Contractor memory cont = contractors[contractorUserId];
 
+        // increment only if they meet the score check
+
         if (cont.level == TOTAL_LEVELS) {
             revert BuilderBuddy__AlreadyMaxedLevel();
         }
@@ -147,31 +149,6 @@ contract BuilderBuddy is UserRegistration {
 
         contractors[contractorUserId].totalCollateralDeposited = collateralRequired[cont.level];
     }
-
-    /**
-     * @dev Allows contractor to stake usdc
-     * @notice This is just to stake but not for incrementing their level
-     * @notice Therefore, they can only stake less than or equal to associated with their current level
-     * @param contractorUserId The user if of contractor
-     * @param amount The amount to stake
-     */
-    function stakeUSDC(bytes12 contractorUserId, uint256 amount) external onlyContractor(contractorUserId) {
-        Contractor memory contr = contractors[contractorUserId];
-
-        if ((contr.totalCollateralDeposited + amount) >= collateralRequired[contr.level]) {
-            revert BuilderBuddy__AlreadyStaked();
-        }
-
-        emit ContractorStaked(msg.sender);
-        bool success = i_usdc.transferFrom(msg.sender, address(this), amount);
-
-        if (!success) {
-            revert BuilderBuddy__StakingFailed();
-        }
-
-        contractors[contractorUserId].totalCollateralDeposited += amount;
-    }
-
 
     // should we add category for an order??
     /**
@@ -220,6 +197,7 @@ contract BuilderBuddy is UserRegistration {
      * @param contractorId The contractor's user id
      * @notice if contractor is already assigned, then contractor can't be assigned to another order
     */
+    // PENDING - ADD A CHECK IF IN CASE ORDER LEVEL IS GREATER THAN CONTRACTOR LVL THEN REVERT
     function assignContractorToOrder(bytes12 userId, uint256 orderId, bytes12 contractorId)
         external
         onlyCustomer(userId)

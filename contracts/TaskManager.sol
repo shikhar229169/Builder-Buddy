@@ -214,8 +214,8 @@ contract TaskManager {
      * @param _contractorId The unique identifier of the contractor.
      * @param _clientAddress The Ethereum address of the client.
      * @param _contractorAddress The Ethereum address of the contractor.
-     * @param _level The client's level.
-     * @param _collateralDeposited The amount of collateral deposited by the client.
+     * @param _level The contractor's level.
+     * @param _collateralDeposited The amount of collateral deposited by the contractor.
      * @param _usdc The address of the USDC token contract.
      */
     constructor(
