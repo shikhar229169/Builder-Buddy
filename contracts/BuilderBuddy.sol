@@ -31,13 +31,19 @@ contract BuilderBuddy is UserRegistration {
         address taskContract;
     }
 
+    ///* @dev For a particular level contractor needs to have at least 'score' score
+    struct LevelRequirements {
+        uint256 collateralRequired;
+        uint256 minScore;
+    }
+
     // Errors
     error BuilderBuddy__InvalidCustomer();
     error BuilderBuddy__CallerNotOwnerOfOrder();
     error BuilderBuddy__ContractorNotFound();
     error BuilderBuddy__ContractorAlreadySet();
     error BuilderBuddy__InvalidContractor();
-    error BuilderBuddy__InvalidLevelsForCollateral();
+    error BuilderBuddy__InvalidLevelsConfig();
     error BuilderBuddy__AlreadyStaked();
     error BuilderBuddy__StakingFailed();
     error BuilderBuddy__AlreadyMaxedLevel();
@@ -46,12 +52,15 @@ contract BuilderBuddy is UserRegistration {
     error BuilderBuddy__AmountIsZero();
     error BuilderBuddy__AmountExceedsDeposited();
     error BuilderBuddy__WithdrawFailed();
+    error BuilderBuddy__YouCantDowngrade();
+    error BuilderBuddy__YouCantUpgrade();
+    error BuilderBuddy__ScoreIsLess();
 
     // State Variables
     uint256 private orderCounter;
     uint256 private constant TOTAL_LEVELS = 5;
     mapping (uint256 orderId => CustomerOrder order) private orders;
-    mapping (uint8 level => uint256 collateralNeeded) private collateralRequired;  // MAKE A CHANGE HERE TO ADD STRUCT FOR COLLATERAL AS WELL AS SCORE, ALSO ADD MIN ELIGIBLE LEVEL (NOT NEC. REQ AS WE CAN GET IT VIA THEIR SCORE BY LOOPING)
+    mapping (uint8 level => LevelRequirements) private levelRequirements;
     IERC20 private immutable i_usdc;
 
     // Events
@@ -96,22 +105,28 @@ contract BuilderBuddy is UserRegistration {
         bytes memory _secrets,
         string memory donName,
         uint256[] memory collateralsForLevel,
+        uint256[] memory scoreForLevel,
         address usdcToken
     ) UserRegistration(router, _minimumScore, _scorerId, _source, _subscriptionId, _gasLimit, _secrets, donName) {
         if (collateralsForLevel.length != 5) {
-            revert BuilderBuddy__InvalidLevelsForCollateral();
+            revert BuilderBuddy__InvalidLevelsConfig();
         }
 
-        for (uint256 i = 0; i < TOTAL_LEVELS; i++) {
+        if (scoreForLevel[0] != 0) {
+            revert BuilderBuddy__InvalidLevelsConfig();
+        }
+
+        for (uint8 i = 0; i < TOTAL_LEVELS; i++) {
             if (collateralsForLevel[i] == 0) {
-                revert BuilderBuddy__InvalidLevelsForCollateral();
+                revert BuilderBuddy__InvalidLevelsConfig();
             }
 
-            if (i != 0 && collateralsForLevel[i] < collateralsForLevel[i - 1]) {
-                revert BuilderBuddy__InvalidLevelsForCollateral();
+            if (i != 0 && (collateralsForLevel[i] <= collateralsForLevel[i - 1] || scoreForLevel[i] <= scoreForLevel[i - 1])) {
+                revert BuilderBuddy__InvalidLevelsConfig();
             }
 
-            collateralRequired[uint8(i + 1)] = collateralsForLevel[i];
+            levelRequirements[i + 1].collateralRequired = collateralsForLevel[i];
+            levelRequirements[i + 1].minScore = scoreForLevel[i];
         }
 
         orderCounter = 0;
@@ -125,29 +140,59 @@ contract BuilderBuddy is UserRegistration {
      * @dev Allows contractor to stake usdc to increment their level
      * @param contractorUserId The contractor's user id
     */
-    function incrementLevelAndStakeUSDC(bytes12 contractorUserId) external onlyContractor(contractorUserId) {
+    function incrementLevelAndStakeUSDC(bytes12 contractorUserId, uint8 _level) external onlyContractor(contractorUserId) {
         Contractor memory cont = contractors[contractorUserId];
 
-        // increment only if they meet the score check
+        if (_level <= cont.level) {
+            revert BuilderBuddy__YouCantDowngrade();
+        }
 
-        if (cont.level == TOTAL_LEVELS) {
+        if (_level > TOTAL_LEVELS) {
             revert BuilderBuddy__AlreadyMaxedLevel();
         }
 
-        contractors[contractorUserId].level++;
-        if (cont.totalCollateralDeposited >= collateralRequired[cont.level]) {
-            revert BuilderBuddy__AlreadyStaked();
+        LevelRequirements memory req = levelRequirements[_level];
+
+        if (cont.score < req.minScore) {
+            revert BuilderBuddy__ScoreIsLess();
         }
 
         emit ContractorStaked(msg.sender);
-        bool success = i_usdc.transferFrom(msg.sender, address(this), collateralRequired[cont.level] - cont.totalCollateralDeposited);
+        bool success = i_usdc.transferFrom(msg.sender, address(this), req.collateralRequired - cont.totalCollateralDeposited);
 
         if (!success) {
             revert BuilderBuddy__StakingFailed();
         }
 
 
-        contractors[contractorUserId].totalCollateralDeposited = collateralRequired[cont.level];
+        contractors[contractorUserId].totalCollateralDeposited = req.collateralRequired;
+        contractors[contractorUserId].level = _level;
+    }
+
+    /**
+     * @dev Allows contractor to unstake their USDC deposited
+     * @notice Assigns the respective level to the contractor based on the remaining amount
+     * @param contractorUserId The user id of the contractor
+     * @param _level The level to downgrade to
+    */
+    function withdrawStakedUSDC(bytes12 contractorUserId, uint8 _level) external onlyContractor(contractorUserId) isContractorValid(contractorUserId) {
+        Contractor memory cont = contractors[contractorUserId];
+        uint8 currLevel = cont.level;
+
+        if (_level >= currLevel) {
+            revert BuilderBuddy__YouCantUpgrade();
+        }
+
+        uint256 remainingStakedAmount = levelRequirements[_level].collateralRequired;
+        uint256 amount = cont.totalCollateralDeposited - remainingStakedAmount;
+
+        bool success = i_usdc.transfer(msg.sender, amount);
+        if (!success) {
+            revert BuilderBuddy__WithdrawFailed();
+        }
+
+        contractors[contractorUserId].level = _level;
+        contractors[contractorUserId].totalCollateralDeposited = remainingStakedAmount;
     }
 
     // should we add category for an order??
@@ -272,42 +317,6 @@ contract BuilderBuddy is UserRegistration {
     }
 
     /**
-     * @dev Allows contractor to unstake their USDC deposited
-     * @notice Assigns the respective level to the contractor based on the remaining amount
-     * @param contractorUserId The user id of the contractor
-     * @param amount Amount of USDC to withdraw
-    */
-    function withdrawStakedUSDC(bytes12 contractorUserId, uint256 amount) external onlyContractor(contractorUserId) isContractorValid(contractorUserId) {
-        if (amount == 0) {
-            revert BuilderBuddy__AmountIsZero();
-        }
-
-        if (amount > contractors[contractorUserId].totalCollateralDeposited) {
-            revert BuilderBuddy__AmountExceedsDeposited();
-        }
-
-        uint256 remainingAmount = contractors[contractorUserId].totalCollateralDeposited - amount;
-
-        uint8 level = 0;
-        uint8 currLevel = contractors[contractorUserId].level;
-
-        for (uint8 i = currLevel; i > 0; i--) {
-            uint256 reqAmt = collateralRequired[i];
-            if (remainingAmount >= reqAmt) {
-                level = i;
-                break;
-            }
-        }
-
-        bool success = i_usdc.transfer(msg.sender, amount);
-        if (!success) {
-            revert BuilderBuddy__WithdrawFailed();
-        }
-
-        contractors[contractorUserId].level = level;
-    }
-
-    /**
      * @dev Returns the order details corresponding to order id
      * @param orderId The order id of the customer's order
      */
@@ -374,7 +383,33 @@ contract BuilderBuddy is UserRegistration {
             revert();
         }
 
-        return collateralRequired[level];
+        return levelRequirements[level].collateralRequired;
+    }
+
+    /**
+     * @dev Returns the max eligible level a contractor can have
+     * @param score The score of contractor
+    */
+    function getMaxEligibleLevelByScore(uint256 score) external view returns (uint256) {
+        uint8 level = 1;
+        
+        while (level + 1 < TOTAL_LEVELS && score >= levelRequirements[level + 1].minScore) {
+            level++;
+        }
+
+        return level;
+    }
+
+    /**
+     * @dev Returns the minimum score required to be eligible for a level
+     * @param level The level of the contractor
+    */
+    function getScore(uint8 level) external view returns (uint256) {
+        if (level == 0 || level > TOTAL_LEVELS) {
+            revert();
+        }
+
+        return levelRequirements[level].minScore;
     }
 
     /**
