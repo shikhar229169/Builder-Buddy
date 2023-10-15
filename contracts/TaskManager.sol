@@ -2,8 +2,8 @@
 
 pragma solidity 0.8.19;
 
-import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import { BuilderBuddy } from "./BuilderBuddy.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {BuilderBuddy} from "./BuilderBuddy.sol";
 
 /// @title Task Manager Smart Contract
 /// @notice A contract for managing tasks between clients and contractors.
@@ -15,7 +15,8 @@ contract TaskManager {
         PENDING,
         APPROVED,
         FINISHED,
-        INITIATED
+        INITIATED,
+        REJECTED
     }
 
     /**
@@ -26,6 +27,8 @@ contract TaskManager {
         string description;
         uint256 cost;
         Status status;
+        uint256 number;
+        uint256 version;
     }
 
     /**
@@ -53,6 +56,8 @@ contract TaskManager {
      */
     address private s_contractorAddress;
 
+    uint256 private immutable i_orderId;
+
     /**
      * @dev The amount of collateral deposited by the client, set during contract initialization and remains constant.
      */
@@ -68,13 +73,32 @@ contract TaskManager {
      */
     uint256 private s_taskCounter = 0;
 
-    mapping (uint256 => Task) private tasks;
+    /**
+     * @dev The task version counter, which tracks the version of tasks created in the contract.
+     */
+    uint256 private s_taskVersionCounter = 0;
+
+    uint256 private s_rejectedTaskCounter = 0;
+
+    bool private s_isContractActive;
+
+    /**
+     * @dev A mapping that associates a task ID (uint256) with its corresponding task information.
+     */
+    mapping(uint256 => Task) private tasks;
+
+    /**
+     * @dev A nested mapping to store rejected tasks. The outer mapping associates a task number (uint256) with the inner mapping.
+     * The inner mapping associates a task version (uint256) with the corresponding task information.
+     */
+    mapping(uint256 => Task task) private rejectedTask;
+
+    mapping(uint256 => uint256) private taskRating;
 
     /**
      * @dev The instance of the BuilderBuddy contract
      */
     BuilderBuddy private builderBuddy;
-
 
     /**
      * @dev Custom error: Indicates that a task is not in the "Approved" status.
@@ -106,13 +130,26 @@ contract TaskManager {
      */
     error TaskManager__CostGreaterThanCollateral();
 
-    error TaskManager__AlreadyApproved();
+    /**
+     * @dev Error indicating that a task has already been approved.
+     */
+    error TaskManager__NotInitiated();
 
+    /**
+     * @dev Error indicating that there are insufficient funds to execute a task.
+     */
     error TaskManager__InsufficientFundsForTask();
 
+    /**
+     * @dev Error indicating that funds transfer for a task has failed.
+     */
     error TaskManager__FundsTransferFailed();
 
+    /**
+     * @dev Error indicating that the task is not in a pending state.
+     */
     error TaskManager__NotPending();
+    error TaskManager__ContractNotActive();
 
     /**
      * @dev Modifier to ensure the previous task is finished before executing a function.
@@ -121,10 +158,8 @@ contract TaskManager {
     modifier lastTaskFinished() {
         // @audit Also add check for rejected
         // @audit-issue If new task is being added and prev task was rejected then it will also revert, but this should not be the case
-        if (
-            s_taskCounter > 0 &&
-            tasks[s_taskCounter].status != Status.FINISHED
-        ) revert TaskManager__PreviousTaskNotFinished();
+        if (s_taskCounter > 0 && tasks[s_taskCounter].status != Status.FINISHED)
+            revert TaskManager__PreviousTaskNotFinished();
         _;
     }
 
@@ -161,23 +196,32 @@ contract TaskManager {
      * @dev Reverts the transaction if the task is not in the "Approved" status.
      */
     modifier isApproved() {
-        if (tasks[s_taskCounter].status != Status.APPROVED) revert TaskManager__NotApproved();
-        _;
-    }
-
-    modifier isPending() {
-        if (tasks[s_taskCounter].status != Status.PENDING) revert TaskManager__NotPending();
+        if (tasks[s_taskCounter].status != Status.APPROVED)
+            revert TaskManager__NotApproved();
         _;
     }
 
     /**
-     * @dev Modifier to ensure that the task cost is lower than a percentage of the collateral deposited by the client.
-     * @dev Reverts the transaction if the cost is greater than or equal to 80% of the collateral.
-     * @param cost The cost of the task to be checked.
+     * @dev Modifier to check if a task is in the "PENDING" status.
+     * @notice Reverts with `TaskManager__NotPending` error if the task is not in the "PENDING" status.
      */
-    modifier costLowerThanCollateral(uint256 cost) {
-        if (cost * 100 >= i_collateralDeposited * 80)
-            revert TaskManager__CostGreaterThanCollateral();
+    modifier isPending() {
+        if (tasks[s_taskCounter].status != Status.PENDING)
+            revert TaskManager__NotPending();
+        _;
+    }
+
+    /**
+     * @dev Modifier to check if a task is in the "INITIATED" status.
+     * @notice Reverts with `TaskManager__NotPending` error if the task is not in the "PENDING" status.
+     */
+    modifier isInitiated() {
+        if (tasks[s_taskCounter].status != Status.INITIATED)
+            revert TaskManager__NotInitiated();
+        _;
+    }
+    modifier isActive() {
+        if (!s_isContractActive) revert TaskManager__ContractNotActive();
         _;
     }
 
@@ -236,6 +280,7 @@ contract TaskManager {
      * @param _usdc The address of the USDC token contract.
      */
     constructor(
+        uint256 _orderId,
         bytes12 _clientId,
         bytes12 _contractorId,
         address _clientAddress,
@@ -253,6 +298,8 @@ contract TaskManager {
         i_usdc = _usdc;
         i_collateralDeposited = _collateralDeposited;
         builderBuddy = BuilderBuddy(builderBuddyAddr);
+        s_isContractActive = true;
+        i_orderId = _orderId;
     }
 
     /**
@@ -268,15 +315,22 @@ contract TaskManager {
         string memory _title,
         string memory _description,
         uint256 _cost
-    ) public onlyContractor lastTaskFinished costLowerThanCollateral(_cost) {
+    ) public onlyContractor lastTaskFinished isActive {
+        if (cost * 100 >= i_collateralDeposited * 80)
+            revert TaskManager__CostGreaterThanCollateral();
+
+        s_taskCounter++;
+        s_taskVersionCounter++;
+
         Task memory task = Task({
             title: _title,
             cost: _cost,
             description: _description,
-            status: Status.INITIATED
+            status: Status.INITIATED,
+            taskNumber: s_taskCounter,
+            version: s_taskVersionCounter
         });
 
-        s_taskCounter++;
         tasks[s_taskCounter] = task;
         emit TaskAdded(s_taskCounter, task.title, "Initiated");
     }
@@ -286,21 +340,13 @@ contract TaskManager {
      * @dev Only callable by the client assigned to the task.
      * @dev Requires that there are existing tasks to approve.
      */
-    function approveTask() public onlyClient hasTasks {
-        // @audit-issue Check that the curr status should be Initiated then only allow it, otherwise revert
-        if (tasks[s_taskCounter].status != Status.INITIATED) {
-            revert TaskManager__AlreadyApproved();
-        }
-
+    function approveTask() public onlyClient hasTasks isInitiated isActive {
         // @audit also ensure that the their are enough USDC in this contract for that task
         if (i_usdc.balanceOf(address(this)) < tasks[s_taskCounter].cost) {
             revert TaskManager__InsufficientFundsForTask();
         }
 
         tasks[s_taskCounter].status = Status.APPROVED;
-
-        ///@dev Make sure to check if the collateral deposited by the contrator
-        /// is more than the cost the user is approving and is being transfered
 
         emit TaskApproved(
             s_taskCounter,
@@ -314,20 +360,17 @@ contract TaskManager {
      * @dev Only callable by the client who initiated the task.
      * @dev Requires that there are existing tasks to reject.
      */
-    function rejectTask() public onlyClient hasTasks {
-        // @audit Why is it decremented
-        // @audit If new task added then it will be overwritten
-        // @audit also no updates in status of that task
+    function rejectTask() public onlyClient hasTasks isInitiated isActive {
+        Task storage task = tasks[s_taskCounter];
+
+        task.status = Status.REJECTED;
+
+        s_rejectedTaskCounter++;
+        rejectedTask[s_rejectedTaskCounter] = task;
+
         s_taskCounter--;
 
-        ///@dev Make sure to check if the collateral deposited by the contrator
-        /// is more than the cost the user is approving and is being transfered
-
-        emit TaskRejected(
-            s_taskCounter + 1,
-            tasks[s_taskCounter + 1].title,
-            "Rejected"
-        );
+        emit TaskRejected(currentTask.number, currentTask.title, "Rejected");
     }
 
     /**
@@ -335,13 +378,13 @@ contract TaskManager {
      * @dev Only callable by the contractor assigned to the task.
      * @dev Requires that there are existing tasks and the current task is "Approved".
      */
-    function availCost() public onlyContractor hasTasks isApproved {
+    function availCost() public onlyContractor hasTasks isApproved isActive {
         uint256 amount = tasks[s_taskCounter].cost;
         tasks[s_taskCounter].status = Status.PENDING;
 
         emit AmountTransferred(s_taskCounter, amount, "Pending");
 
-        (bool success) = i_usdc.transfer(msg.sender, amount);
+        bool success = i_usdc.transfer(msg.sender, amount);
 
         if (!success) {
             revert TaskManager__FundsTransferFailed();
@@ -354,13 +397,32 @@ contract TaskManager {
      * @dev Requires that there are existing tasks and the current task is "Approved".
      */
     // @audit-issue The Check should be isPending instead of isApproved
-    function finishTask() public onlyClient hasTasks isPending {
+    function finishTask(
+        uint256 rating
+    ) public onlyClient hasTasks isPending isActive {
+        s_taskVersionCounter = 0;
         tasks[s_taskCounter].status = Status.FINISHED;
+
+        taskRating[s_taskCounter] = rating; // rating
+
         emit TaskFinished(
             s_taskCounter,
             tasks[s_taskCounter].title,
             "Finished"
         );
+    }
+
+    function finishWork() public onlyClient lastTaskFinished isActive {
+        uint256 overallRating = 0;
+        for (uint256 i = 1; i <= s_taskCounter; i++) {
+            overallRating += taskRating[i];
+        }
+        overallRating *= 100;
+        overallRating /= s_taskCounter;
+
+        builderBuddy.markOrderAsCompleted(i_orderId, overallRating);
+
+        s_isContractActive = false;
     }
 
     // @audit add function to finally mark whole Task as completed
@@ -452,6 +514,15 @@ contract TaskManager {
             allTasks[i - 1] = tasks[i];
         }
 
+        return allTasks;
+    }
+
+    function getAllRejectedTasks() public view returns (Task[] memory) {
+        Task[] memory allTasks = new Task[](s_rejectedTaskCounter);
+
+        for (uint256 i = 1; i <= s_rejectedTaskCounter; i++) {
+            allTasks[i] = rejectedTask[i];
+        }
         return allTasks;
     }
 }
