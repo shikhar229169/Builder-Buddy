@@ -17,6 +17,7 @@ contract BuilderBuddy is UserRegistration {
     }
 
     // Structs
+    // @audit Add level for that Task (Order)
     struct CustomerOrder {
         address customer;
         string title;
@@ -139,6 +140,7 @@ contract BuilderBuddy is UserRegistration {
     /**
      * @dev Allows contractor to stake usdc to increment their level
      * @param contractorUserId The contractor's user id
+     * @param _level Level the contractor want to upgrade to
     */
     function incrementLevelAndStakeUSDC(bytes12 contractorUserId, uint8 _level) external onlyContractor(contractorUserId) {
         Contractor memory cont = contractors[contractorUserId];
