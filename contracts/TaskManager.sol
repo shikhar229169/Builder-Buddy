@@ -316,7 +316,7 @@ contract TaskManager {
         string memory _description,
         uint256 _cost
     ) public onlyContractor lastTaskFinished isActive {
-        if (cost * 100 >= i_collateralDeposited * 80)
+        if (_cost * 100 >= i_collateralDeposited * 80)
             revert TaskManager__CostGreaterThanCollateral();
 
         s_taskCounter++;
@@ -327,7 +327,7 @@ contract TaskManager {
             cost: _cost,
             description: _description,
             status: Status.INITIATED,
-            taskNumber: s_taskCounter,
+            number: s_taskCounter,
             version: s_taskVersionCounter
         });
 
@@ -370,7 +370,7 @@ contract TaskManager {
 
         s_taskCounter--;
 
-        emit TaskRejected(currentTask.number, currentTask.title, "Rejected");
+        emit TaskRejected(task.number, task.title, "Rejected");
     }
 
     /**
