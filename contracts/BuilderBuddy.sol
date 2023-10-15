@@ -141,7 +141,7 @@ contract BuilderBuddy is UserRegistration {
      * @dev Allows contractor to stake usdc to increment their level
      * @param contractorUserId The contractor's user id
      * @param _level Level the contractor want to upgrade to
-    */
+     */
     function incrementLevelAndStakeUSDC(bytes12 contractorUserId, uint8 _level) external onlyContractor(contractorUserId) {
         Contractor memory cont = contractors[contractorUserId];
 
@@ -176,7 +176,7 @@ contract BuilderBuddy is UserRegistration {
      * @notice Assigns the respective level to the contractor based on the remaining amount
      * @param contractorUserId The user id of the contractor
      * @param _level The level to downgrade to
-    */
+     */
     function withdrawStakedUSDC(bytes12 contractorUserId, uint8 _level) external onlyContractor(contractorUserId) isContractorValid(contractorUserId) {
         Contractor memory cont = contractors[contractorUserId];
         uint8 currLevel = cont.level;
@@ -206,7 +206,7 @@ contract BuilderBuddy is UserRegistration {
      * @param locality The locality of the order
      * @param budget The budget of the customer for the work
      * @param expectedStartDate The expected start date of the work
-    */
+     */
     function createOrder(
         bytes12 userId,
         string memory title,
@@ -243,7 +243,7 @@ contract BuilderBuddy is UserRegistration {
      * @param orderId The customer's order id
      * @param contractorId The contractor's user id
      * @notice if contractor is already assigned, then contractor can't be assigned to another order
-    */
+     */
     // PENDING - ADD A CHECK IF IN CASE ORDER LEVEL IS GREATER THAN CONTRACTOR LVL THEN REVERT
     function assignContractorToOrder(bytes12 userId, uint256 orderId, bytes12 contractorId)
         external
@@ -280,7 +280,7 @@ contract BuilderBuddy is UserRegistration {
      * @notice 2 way txn process to confirm the order by both customer and contractor0
      * @param contractorUserId The contractor's user id
      * @param orderId The customer's order id
-    */
+     */
     function confirmUserOrder(bytes12 contractorUserId, uint256 orderId) external onlyContractor(contractorUserId) isContractorValid(contractorUserId) {
         if (orders[orderId].contractor != msg.sender) {
             revert BuilderBuddy__CallerNotOwnerOfOrder();
@@ -305,7 +305,7 @@ contract BuilderBuddy is UserRegistration {
      * @dev Mark the order as confirmed upon confirmation by customer
      * @notice This is called by Task Manager Contract by a function which is called by customer
      * @param orderId The customer's order id
-    */
+     */
     function markOrderAsCompleted(uint256 orderId) external {
         // only callable by task manager contract
         if (msg.sender != orders[orderId].taskContract) {
@@ -345,7 +345,7 @@ contract BuilderBuddy is UserRegistration {
 
     /**
      * @notice Returns all the orders placed by customers
-    */
+     */
     function getAllOrders() external view returns (CustomerOrder[] memory) {
         CustomerOrder[] memory currOrder = new CustomerOrder[](orderCounter);
 
@@ -391,7 +391,7 @@ contract BuilderBuddy is UserRegistration {
     /**
      * @dev Returns the max eligible level a contractor can have
      * @param score The score of contractor
-    */
+     */
     function getMaxEligibleLevelByScore(uint256 score) external view returns (uint256) {
         uint8 level = 1;
         
@@ -405,7 +405,7 @@ contract BuilderBuddy is UserRegistration {
     /**
      * @dev Returns the minimum score required to be eligible for a level
      * @param level The level of the contractor
-    */
+     */
     function getScore(uint8 level) external view returns (uint256) {
         if (level == 0 || level > TOTAL_LEVELS) {
             revert();

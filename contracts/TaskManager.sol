@@ -9,6 +9,26 @@ import { BuilderBuddy } from "./BuilderBuddy.sol";
 /// @notice A contract for managing tasks between clients and contractors.
 contract TaskManager {
     /**
+     * @dev Represents the status of a task.
+     */
+    enum Status {
+        PENDING,
+        APPROVED,
+        FINISHED,
+        INITIATED
+    }
+
+    /**
+     * @dev Represents a task with a title, description, cost, and status.
+     */
+    struct Task {
+        string title;
+        string description;
+        uint256 cost;
+        Status status;
+    }
+
+    /**
      * @dev The client's level, which is set during contract initialization and remains constant.
      */
     uint8 private immutable i_level;
@@ -48,30 +68,13 @@ contract TaskManager {
      */
     uint256 private s_taskCounter = 0;
 
+    mapping (uint256 => Task) private tasks;
+
     /**
      * @dev The instance of the BuilderBuddy contract
      */
     BuilderBuddy private builderBuddy;
 
-    /**
-     * @dev Represents the status of a task.
-     */
-    enum Status {
-        PENDING,
-        APPROVED,
-        FINISHED,
-        INITIATED
-    }
-
-    /**
-     * @dev Represents a task with a title, description, cost, and status.
-     */
-    struct Task {
-        string title;
-        string description;
-        uint256 cost;
-        Status status;
-    }
 
     /**
      * @dev Custom error: Indicates that a task is not in the "Approved" status.
@@ -103,14 +106,24 @@ contract TaskManager {
      */
     error TaskManager__CostGreaterThanCollateral();
 
+    error TaskManager__AlreadyApproved();
+
+    error TaskManager__InsufficientFundsForTask();
+
+    error TaskManager__FundsTransferFailed();
+
+    error TaskManager__NotPending();
+
     /**
      * @dev Modifier to ensure the previous task is finished before executing a function.
      * @dev Reverts the transaction if the previous task is not finished or it's the first task.
      */
     modifier lastTaskFinished() {
+        // @audit Also add check for rejected
+        // @audit-issue If new task is being added and prev task was rejected then it will also revert, but this should not be the case
         if (
             s_taskCounter > 0 &&
-            tasks[s_taskCounter - 1].status != Status.FINISHED
+            tasks[s_taskCounter].status != Status.FINISHED
         ) revert TaskManager__PreviousTaskNotFinished();
         _;
     }
@@ -146,10 +159,14 @@ contract TaskManager {
     /**
      * @dev Modifier to ensure that a task is in the "Approved" status.
      * @dev Reverts the transaction if the task is not in the "Approved" status.
-     * @param task The task to check for approval.
      */
-    modifier isApproved(Task memory task) {
-        if (task.status != Status.APPROVED) revert TaskManager__NotApproved();
+    modifier isApproved() {
+        if (tasks[s_taskCounter].status != Status.APPROVED) revert TaskManager__NotApproved();
+        _;
+    }
+
+    modifier isPending() {
+        if (tasks[s_taskCounter].status != Status.PENDING) revert TaskManager__NotPending();
         _;
     }
 
@@ -159,7 +176,7 @@ contract TaskManager {
      * @param cost The cost of the task to be checked.
      */
     modifier costLowerThanCollateral(uint256 cost) {
-        if (cost * 100 >= collateral * 80)
+        if (cost * 100 >= i_collateralDeposited * 80)
             revert TaskManager__CostGreaterThanCollateral();
         _;
     }
@@ -258,6 +275,7 @@ contract TaskManager {
             description: _description,
             status: Status.INITIATED
         });
+
         s_taskCounter++;
         tasks[s_taskCounter] = task;
         emit TaskAdded(s_taskCounter, task.title, "Initiated");
@@ -269,6 +287,16 @@ contract TaskManager {
      * @dev Requires that there are existing tasks to approve.
      */
     function approveTask() public onlyClient hasTasks {
+        // @audit-issue Check that the curr status should be Initiated then only allow it, otherwise revert
+        if (tasks[s_taskCounter].status != Status.INITIATED) {
+            revert TaskManager__AlreadyApproved();
+        }
+
+        // @audit also ensure that the their are enough USDC in this contract for that task
+        if (i_usdc.balanceOf(address(this)) < tasks[s_taskCounter].cost) {
+            revert TaskManager__InsufficientFundsForTask();
+        }
+
         tasks[s_taskCounter].status = Status.APPROVED;
 
         ///@dev Make sure to check if the collateral deposited by the contrator
@@ -287,6 +315,9 @@ contract TaskManager {
      * @dev Requires that there are existing tasks to reject.
      */
     function rejectTask() public onlyClient hasTasks {
+        // @audit Why is it decremented
+        // @audit If new task added then it will be overwritten
+        // @audit also no updates in status of that task
         s_taskCounter--;
 
         ///@dev Make sure to check if the collateral deposited by the contrator
@@ -305,9 +336,16 @@ contract TaskManager {
      * @dev Requires that there are existing tasks and the current task is "Approved".
      */
     function availCost() public onlyContractor hasTasks isApproved {
-        uint256 amount;
+        uint256 amount = tasks[s_taskCounter].cost;
         tasks[s_taskCounter].status = Status.PENDING;
+
         emit AmountTransferred(s_taskCounter, amount, "Pending");
+
+        (bool success) = i_usdc.transfer(msg.sender, amount);
+
+        if (!success) {
+            revert TaskManager__FundsTransferFailed();
+        }
     }
 
     /**
@@ -315,7 +353,8 @@ contract TaskManager {
      * @dev Only callable by the client who initiated the task.
      * @dev Requires that there are existing tasks and the current task is "Approved".
      */
-    function finishTask() public onlyClient hasTasks isApproved {
+    // @audit-issue The Check should be isPending instead of isApproved
+    function finishTask() public onlyClient hasTasks isPending {
         tasks[s_taskCounter].status = Status.FINISHED;
         emit TaskFinished(
             s_taskCounter,
@@ -323,6 +362,8 @@ contract TaskManager {
             "Finished"
         );
     }
+
+    // @audit add function to finally mark whole Task as completed
 
     /**
      * @dev Get the client's level.
