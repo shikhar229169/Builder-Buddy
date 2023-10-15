@@ -368,8 +368,8 @@ contract BuilderBuddy is UserRegistration {
         if (msg.sender != orders[orderId].taskContract) {
             revert BuilderBuddy__OnlyTaskContractCanCall();
         }
-
-        orders[orderId].status = Status.FINISHED;
+        CustomerOrder storage order = orders[orderId];
+        order.status = Status.FINISHED;
         Contractor storage contractor = contractors[order.contractorId];
         contractor.isAssigned = false;
         contractor.score += score;
