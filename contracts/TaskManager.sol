@@ -2,8 +2,8 @@
 
 pragma solidity 0.8.19;
 
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {BuilderBuddy} from "./BuilderBuddy.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { BuilderBuddy } from "./BuilderBuddy.sol";
 
 /// @title Task Manager Smart Contract
 /// @notice A contract for managing tasks between clients and contractors.
@@ -32,7 +32,7 @@ contract TaskManager {
     }
 
     /**
-     * @dev The client's level, which is set during contract initialization and remains constant.
+     * @dev The order's level, which is set during contract initialization and remains constant.
      */
     uint8 private immutable i_level;
 
@@ -47,19 +47,19 @@ contract TaskManager {
     bytes12 private immutable i_contractorId;
 
     /**
-     * @dev The Ethereum address of the client, which can change if needed.
+     * @dev The Ethereum address of the client
      */
     address private s_clientAddress;
 
     /**
-     * @dev The Ethereum address of the contractor, which can change if needed.
+     * @dev The Ethereum address of the contractor
      */
     address private s_contractorAddress;
 
     uint256 private immutable i_orderId;
 
     /**
-     * @dev The amount of collateral deposited by the client, set during contract initialization and remains constant.
+     * @dev The amount of collateral deposited by the contractor, set during contract initialization and remains constant.
      */
     uint256 private immutable i_collateralDeposited;
 
@@ -88,11 +88,13 @@ contract TaskManager {
     mapping(uint256 => Task) private tasks;
 
     /**
-     * @dev A nested mapping to store rejected tasks. The outer mapping associates a task number (uint256) with the inner mapping.
-     * The inner mapping associates a task version (uint256) with the corresponding task information.
+     * @dev A mapping that associates rejected task ID (uint156) with its corresponding rejected task information.
      */
     mapping(uint256 => Task task) private rejectedTask;
 
+    /**
+     * @dev The rating given by client for each task.
+     */
     mapping(uint256 => uint256) private taskRating;
 
     /**
@@ -156,8 +158,6 @@ contract TaskManager {
      * @dev Reverts the transaction if the previous task is not finished or it's the first task.
      */
     modifier lastTaskFinished() {
-        // @audit Also add check for rejected
-        // @audit-issue If new task is being added and prev task was rejected then it will also revert, but this should not be the case
         if (s_taskCounter > 0 && tasks[s_taskCounter].status != Status.FINISHED)
             revert TaskManager__PreviousTaskNotFinished();
         _;
@@ -270,6 +270,13 @@ contract TaskManager {
     event TaskFinished(uint256 indexed taskId, string title, string status);
 
     /**
+     * Emitted when the whole work is finished.
+     * @param orderId The orderId of work.
+     * @param timestamp The timestamp at which the work is finished.
+     */
+    event WorkFinished(uint256 indexed orderId, uint256 indexed timestamp);
+
+    /**
      * @dev Constructor to initialize the contract with initial parameters.
      * @param _clientId The unique identifier of the client.
      * @param _contractorId The unique identifier of the contractor.
@@ -315,7 +322,7 @@ contract TaskManager {
         string memory _title,
         string memory _description,
         uint256 _cost
-    ) public onlyContractor lastTaskFinished isActive {
+    ) external onlyContractor lastTaskFinished isActive {
         if (_cost * 100 >= i_collateralDeposited * 80)
             revert TaskManager__CostGreaterThanCollateral();
 
@@ -340,8 +347,7 @@ contract TaskManager {
      * @dev Only callable by the client assigned to the task.
      * @dev Requires that there are existing tasks to approve.
      */
-    function approveTask() public onlyClient hasTasks isInitiated isActive {
-        // @audit also ensure that the their are enough USDC in this contract for that task
+    function approveTask() external onlyClient hasTasks isInitiated isActive {
         if (i_usdc.balanceOf(address(this)) < tasks[s_taskCounter].cost) {
             revert TaskManager__InsufficientFundsForTask();
         }
@@ -360,13 +366,15 @@ contract TaskManager {
      * @dev Only callable by the client who initiated the task.
      * @dev Requires that there are existing tasks to reject.
      */
-    function rejectTask() public onlyClient hasTasks isInitiated isActive {
+    function rejectTask() external onlyClient hasTasks isInitiated isActive {
         Task storage task = tasks[s_taskCounter];
 
         task.status = Status.REJECTED;
 
         s_rejectedTaskCounter++;
         rejectedTask[s_rejectedTaskCounter] = task;
+
+        // @audit Still the tasks contain rejected task, what if no further tasks were added
 
         s_taskCounter--;
 
@@ -378,7 +386,7 @@ contract TaskManager {
      * @dev Only callable by the contractor assigned to the task.
      * @dev Requires that there are existing tasks and the current task is "Approved".
      */
-    function availCost() public onlyContractor hasTasks isApproved isActive {
+    function availCost() external onlyContractor hasTasks isApproved isActive {
         uint256 amount = tasks[s_taskCounter].cost;
         tasks[s_taskCounter].status = Status.PENDING;
 
@@ -396,10 +404,9 @@ contract TaskManager {
      * @dev Only callable by the client who initiated the task.
      * @dev Requires that there are existing tasks and the current task is "Approved".
      */
-    // @audit-issue The Check should be isPending instead of isApproved
     function finishTask(
         uint256 rating
-    ) public onlyClient hasTasks isPending isActive {
+    ) external onlyClient hasTasks isPending isActive {
         s_taskVersionCounter = 0;
         tasks[s_taskCounter].status = Status.FINISHED;
 
@@ -412,7 +419,7 @@ contract TaskManager {
         );
     }
 
-    function finishWork() public onlyClient lastTaskFinished isActive {
+    function finishWork() external onlyClient lastTaskFinished isActive {
         uint256 overallRating = 0;
         for (uint256 i = 1; i <= s_taskCounter; i++) {
             overallRating += taskRating[i];
@@ -423,13 +430,14 @@ contract TaskManager {
         builderBuddy.markOrderAsCompleted(i_orderId, overallRating);
 
         s_isContractActive = false;
+
+        emit WorkFinished(i_orderId, block.timestamp);
     }
 
-    // @audit add function to finally mark whole Task as completed
 
     /**
-     * @dev Get the client's level.
-     * @return The level of the client.
+     * @dev Get the order's level.
+     * @return The level of the order.
      */
     function getLevel() public view returns (uint8) {
         return i_level;
@@ -468,8 +476,8 @@ contract TaskManager {
     }
 
     /**
-     * @dev Get the collateral deposited by the client.
-     * @return The amount of collateral deposited by the client.
+     * @dev Get the collateral deposited by the contractor.
+     * @return The amount of collateral deposited by the contractor.
      */
     function getCollateralDeposited() public view returns (uint256) {
         return i_collateralDeposited;
@@ -521,7 +529,7 @@ contract TaskManager {
         Task[] memory allTasks = new Task[](s_rejectedTaskCounter);
 
         for (uint256 i = 1; i <= s_rejectedTaskCounter; i++) {
-            allTasks[i] = rejectedTask[i];
+            allTasks[i - 1] = rejectedTask[i];
         }
         return allTasks;
     }

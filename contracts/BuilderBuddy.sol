@@ -2,8 +2,9 @@
 
 pragma solidity 0.8.19;
 
-import {UserRegistration} from "./UserRegistration.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { UserRegistration } from "./UserRegistration.sol";
+import { TaskManager } from "./TaskManager.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /// @title Builder Buddy Smart Contract
 /// @notice This contract manages users registration and orders
@@ -16,9 +17,9 @@ contract BuilderBuddy is UserRegistration {
         FINISHED
     }
 
-    // @audit Add level for that Task (Order)
     struct CustomerOrder {
         address customer;
+        bytes12 customerId;
         string title;
         string description;
         string locality;
@@ -78,6 +79,7 @@ contract BuilderBuddy is UserRegistration {
     );
     event OrderConfirmed(uint256 indexed orderId, address indexed contractor);
     event ContractorStaked(address indexed contractor);
+    event ContractorUnstaked(address indexed contractor);
 
     // Modifiers
     modifier onlyCustomer(bytes12 userId) {
@@ -198,8 +200,7 @@ contract BuilderBuddy is UserRegistration {
             revert BuilderBuddy__StakingFailed();
         }
 
-        contractors[contractorUserId].totalCollateralDeposited = req
-            .collateralRequired;
+        contractors[contractorUserId].totalCollateralDeposited = req.collateralRequired;
         contractors[contractorUserId].level = _level;
     }
 
@@ -228,17 +229,17 @@ contract BuilderBuddy is UserRegistration {
             .collateralRequired;
         uint256 amount = cont.totalCollateralDeposited - remainingStakedAmount;
 
+        emit ContractorUnstaked(msg.sender);
         bool success = i_usdc.transfer(msg.sender, amount);
         if (!success) {
             revert BuilderBuddy__WithdrawFailed();
         }
 
         contractors[contractorUserId].level = _level;
-        contractors[contractorUserId]
-            .totalCollateralDeposited = remainingStakedAmount;
+        contractors[contractorUserId].totalCollateralDeposited = remainingStakedAmount;
     }
 
-    // should we add category for an order??
+    // @note should we add category for an order??
     /**
      * @dev Allows customer to create an order
      * @param userId The customer's user id
@@ -265,6 +266,7 @@ contract BuilderBuddy is UserRegistration {
 
         orders[orderId] = CustomerOrder({
             customer: msg.sender,
+            customerId: userId,
             title: title,
             description: desc,
             locality: locality,
@@ -290,7 +292,6 @@ contract BuilderBuddy is UserRegistration {
      * @param contractorId The contractor's user id
      * @notice if contractor is already assigned, then contractor can't be assigned to another order
      */
-    // PENDING - ADD A CHECK IF IN CASE ORDER LEVEL IS GREATER THAN CONTRACTOR LVL THEN REVERT
     function assignContractorToOrder(
         bytes12 userId,
         uint256 orderId,
@@ -307,8 +308,7 @@ contract BuilderBuddy is UserRegistration {
             revert BuilderBuddy__ContractorAlreadySet();
         }
 
-        address appointedContractorAddress = contractors[contractorId]
-            .ethAddress;
+        address appointedContractorAddress = contractors[contractorId].ethAddress;
 
         if (appointedContractorAddress == address(0)) {
             revert BuilderBuddy__ContractorNotFound();
@@ -339,11 +339,12 @@ contract BuilderBuddy is UserRegistration {
         onlyContractor(contractorUserId)
         isContractorValid(contractorUserId)
     {
-        if (orders[orderId].contractor != msg.sender) {
+        CustomerOrder memory currOrder = orders[orderId];
+        if (currOrder.contractor != msg.sender) {
             revert BuilderBuddy__CallerNotOwnerOfOrder();
         }
 
-        if (orders[orderId].status != Status.PENDING) {
+        if (currOrder.status != Status.PENDING) {
             revert BuilderBuddy__ContractorAlreadySet();
         }
 
@@ -353,7 +354,10 @@ contract BuilderBuddy is UserRegistration {
         contractors[contractorUserId].acceptedContracts.push(orderId);
 
         // deploy the task contract
+        TaskManager taskManager = new TaskManager(orderId, currOrder.customerId, currOrder.contractorId, currOrder.customer, currOrder.contractor, currOrder.level, contractors[contractorUserId].totalCollateralDeposited, i_usdc, address(this));
+
         // update the task contract address
+        orders[orderId].taskContract = address(taskManager);
 
         emit OrderConfirmed(orderId, msg.sender);
     }
@@ -364,7 +368,6 @@ contract BuilderBuddy is UserRegistration {
      * @param orderId The customer's order id
      */
     function markOrderAsCompleted(uint256 orderId, uint256 score) external {
-        // only callable by task manager contract
         if (msg.sender != orders[orderId].taskContract) {
             revert BuilderBuddy__OnlyTaskContractCanCall();
         }
