@@ -17,11 +17,21 @@ contract BuilderBuddy is UserRegistration {
         FINISHED
     }
 
+    enum Category {
+        Construction,
+        Rennovation,
+        Maintenance,
+        Electrical,
+        Plumbing,
+        Carpentry
+    }
+
     struct CustomerOrder {
         address customer;
         bytes12 customerId;
         string title;
         string description;
+        Category category;
         string locality;
         uint256 budget;
         uint256 expectedStartDate;
@@ -239,7 +249,6 @@ contract BuilderBuddy is UserRegistration {
         contractors[contractorUserId].totalCollateralDeposited = remainingStakedAmount;
     }
 
-    // @note should we add category for an order??
     /**
      * @dev Allows customer to create an order
      * @param userId The customer's user id
@@ -253,6 +262,7 @@ contract BuilderBuddy is UserRegistration {
         bytes12 userId,
         string memory title,
         string memory desc,
+        Category category,
         string memory locality,
         uint8 _level,
         uint256 budget,
@@ -269,6 +279,7 @@ contract BuilderBuddy is UserRegistration {
             customerId: userId,
             title: title,
             description: desc,
+            category: category,
             locality: locality,
             budget: budget,
             expectedStartDate: expectedStartDate,

@@ -374,8 +374,6 @@ contract TaskManager {
         s_rejectedTaskCounter++;
         rejectedTask[s_rejectedTaskCounter] = task;
 
-        // @audit Still the tasks contain rejected task, what if no further tasks were added
-
         s_taskCounter--;
 
         emit TaskRejected(task.number, task.title, "Rejected");
