@@ -152,6 +152,7 @@ contract TaskManager {
      */
     error TaskManager__NotPending();
     error TaskManager__ContractNotActive();
+    error TaskManager__RatingNotInRange();
 
     /**
      * @dev Modifier to ensure the previous task is finished before executing a function.
@@ -405,6 +406,9 @@ contract TaskManager {
     function finishTask(
         uint256 rating
     ) external onlyClient hasTasks isPending isActive {
+        if (rating < 1 || rating > 10) {
+            revert TaskManager__RatingNotInRange();
+        } 
         s_taskVersionCounter = 0;
         tasks[s_taskCounter].status = Status.FINISHED;
 
@@ -432,6 +436,9 @@ contract TaskManager {
         emit WorkFinished(i_orderId, block.timestamp);
     }
 
+    function getOrderId() external view returns (uint256) {
+        return i_orderId;
+    }
 
     /**
      * @dev Get the order's level.
@@ -498,6 +505,22 @@ contract TaskManager {
     }
 
     /**
+     * @dev Get the rejected task counter.
+     * @return The total number of tasks that have been rejected by client.
+     */
+    function getRejectedTaskCounter() public view returns (uint256) {
+        return s_rejectedTaskCounter;
+    }
+
+    /**
+     * @dev Get the task version counter.
+     * @return The total versions of task rejected for the current task
+     */
+    function getTaskVersionCounter() public view returns (uint256) {
+        return s_taskVersionCounter;
+    }
+
+    /**
      * @dev Get information about a specific task.
      * @param taskId The unique identifier of the task.
      * @return A tuple containing the title, description, cost, and status of the task.
@@ -510,8 +533,8 @@ contract TaskManager {
     }
 
     /**
-     * @dev Get information about all tasks.
-     * @return An array of Task structures representing all tasks.
+     * @dev Get information about all non-rejected tasks.
+     * @return An array of Task structures representing all non-rejected tasks.
      */
     function getAllTasks() public view returns (Task[] memory) {
         Task[] memory allTasks = new Task[](s_taskCounter);
@@ -523,6 +546,10 @@ contract TaskManager {
         return allTasks;
     }
 
+    /**
+     * @dev Get details of all rejected tasks.
+     * @return An array of Task structures representing all rejected tasks
+     */
     function getAllRejectedTasks() public view returns (Task[] memory) {
         Task[] memory allTasks = new Task[](s_rejectedTaskCounter);
 
@@ -530,5 +557,12 @@ contract TaskManager {
             allTasks[i - 1] = rejectedTask[i];
         }
         return allTasks;
+    }
+
+    /**
+     * @return True/False representing whether work has finished or not
+     */
+    function isWorkFinished() external view returns (bool) {
+        return (!s_isContractActive);
     }
 }

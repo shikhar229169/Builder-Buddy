@@ -69,6 +69,8 @@ contract BuilderBuddy is UserRegistration {
     error BuilderBuddy__ScoreIsLess();
     error BuilderBuddy__InvalidLevel();
     error BuilderBuddy__ContractorIneligible();
+    error BuilderBuddy__OrderCantHavePastDate();
+    error BuilderBuddy__OrderNotFound();
 
     // State Variables
     uint256 private orderCounter;
@@ -92,6 +94,13 @@ contract BuilderBuddy is UserRegistration {
     event ContractorUnstaked(address indexed contractor);
 
     // Modifiers
+    modifier orderExists(uint256 orderId) {
+        if (orders[orderId].customer == address(0)) {
+            revert BuilderBuddy__OrderNotFound();
+        }
+        _;
+    }
+
     modifier onlyCustomer(bytes12 userId) {
         if (customers[userId].ethAddress != msg.sender) {
             revert BuilderBuddy__InvalidCustomer();
@@ -256,7 +265,7 @@ contract BuilderBuddy is UserRegistration {
      * @param desc The description of the order
      * @param locality The locality of the order
      * @param budget The budget of the customer for the work
-     * @param expectedStartDate The expected start date of the work
+     * @param expectedStartDate The expected start date of the work in unix timestamp (seconds)
      */
     function createOrder(
         bytes12 userId,
@@ -271,6 +280,11 @@ contract BuilderBuddy is UserRegistration {
         if (_level <= 0 || _level > TOTAL_LEVELS) {
             revert BuilderBuddy__InvalidLevel();
         }
+
+        if (expectedStartDate < block.timestamp) {
+            revert BuilderBuddy__OrderCantHavePastDate();
+        }
+
         uint256 orderId = orderCounter;
         orderCounter++;
 
@@ -307,7 +321,7 @@ contract BuilderBuddy is UserRegistration {
         bytes12 userId,
         uint256 orderId,
         bytes12 contractorId
-    ) external onlyCustomer(userId) isContractorValid(contractorId) {
+    ) external onlyCustomer(userId) orderExists(orderId) isContractorValid(contractorId) {
         if (orders[orderId].customer != msg.sender) {
             revert BuilderBuddy__CallerNotOwnerOfOrder();
         }
@@ -348,6 +362,7 @@ contract BuilderBuddy is UserRegistration {
     )
         external
         onlyContractor(contractorUserId)
+        orderExists(orderId)
         isContractorValid(contractorUserId)
     {
         CustomerOrder memory currOrder = orders[orderId];
@@ -395,7 +410,7 @@ contract BuilderBuddy is UserRegistration {
      */
     function getOrder(
         uint256 orderId
-    ) external view returns (CustomerOrder memory) {
+    ) external orderExists(orderId) view returns (CustomerOrder memory) {
         return orders[orderId];
     }
 
