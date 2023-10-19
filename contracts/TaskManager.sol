@@ -4,6 +4,7 @@ pragma solidity 0.8.19;
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { BuilderBuddy } from "./BuilderBuddy.sol";
+import { ArbiterContract } from "./ArbiterContract.sol";
 
 /// @title Task Manager Smart Contract
 /// @notice A contract for managing tasks between clients and contractors.
@@ -58,6 +59,7 @@ contract TaskManager {
 
     uint256 private immutable i_orderId;
 
+
     /**
      * @dev The amount of collateral deposited by the contractor, set during contract initialization and remains constant.
      */
@@ -101,6 +103,12 @@ contract TaskManager {
      * @dev The instance of the BuilderBuddy contract
      */
     BuilderBuddy private builderBuddy;
+
+    ArbiterContract private arbiterContract;
+
+    address private arbiterAssigned;
+
+    // Errors
 
     /**
      * @dev Custom error: Indicates that a task is not in the "Approved" status.
@@ -153,6 +161,10 @@ contract TaskManager {
     error TaskManager__NotPending();
     error TaskManager__ContractNotActive();
     error TaskManager__RatingNotInRange();
+    error TaskManager__NeitherContractorNorClient();
+    error TaskManager__OnlyArbiterCanResolveDisputes();
+    error TaskManager__RefundCantBeMoreThanCost();
+    error TaskManager__LastTaskAlreadyFinished();
 
     /**
      * @dev Modifier to ensure the previous task is finished before executing a function.
@@ -277,6 +289,8 @@ contract TaskManager {
      */
     event WorkFinished(uint256 indexed orderId, uint256 indexed timestamp);
 
+    event ArbiterAdded(address arbiter);
+
     /**
      * @dev Constructor to initialize the contract with initial parameters.
      * @param _clientId The unique identifier of the client.
@@ -308,6 +322,8 @@ contract TaskManager {
         builderBuddy = BuilderBuddy(builderBuddyAddr);
         s_isContractActive = true;
         i_orderId = _orderId;
+        arbiterContract = ArbiterContract(builderBuddy.getArbiterContract());
+        arbiterAssigned = address(0);               // no arbiter assigned initially
     }
 
     /**
@@ -409,10 +425,74 @@ contract TaskManager {
         if (rating < 1 || rating > 10) {
             revert TaskManager__RatingNotInRange();
         } 
+        
+        _finishTask(rating);
+    }
+
+
+    function finishWork() external onlyClient lastTaskFinished isActive {
+        _finishWork();
+    }
+
+    function involveArbiter(address arbiter) external isActive {
+        if (msg.sender != s_clientAddress && msg.sender != s_contractorAddress) {
+            revert TaskManager__NeitherContractorNorClient();
+        }
+
+        arbiterContract.assignArbiterToResolveConflict(arbiter, i_orderId);
+
+        arbiterAssigned = arbiter;
+
+        emit ArbiterAdded(arbiter);
+    }
+
+    function resolveDisputeFavourClient(string memory remarks, uint256 amtToRefund) external isActive {
+        if (msg.sender != arbiterAssigned) {
+            revert TaskManager__OnlyArbiterCanResolveDisputes();
+        }
+
+
+        // now there are 2 scenarios, either the contractor was malicious, or the client didn't called finishTask or finishWork
+        Task memory lastTask = tasks[s_taskCounter];
+        if (lastTask.status == Status.FINISHED) {
+            revert TaskManager__LastTaskAlreadyFinished();
+        }
+
+        if (lastTask.status == Status.INITIATED) {
+            revert TaskManager__NotApproved();
+        }
+
+        if (lastTask.status == Status.PENDING) {
+            if (amtToRefund > lastTask.cost) {
+                revert TaskManager__RefundCantBeMoreThanCost();
+            }
+            builderBuddy.transferCollateralToCustomer(i_orderId, msg.sender, amtToRefund);
+        }
+        else if (lastTask.status == Status.APPROVED) {
+            uint256 cost = lastTask.cost;
+            uint256 arbiterReward = (2 * cost) / 100; 
+            bool success = i_usdc.transfer(s_clientAddress, cost - arbiterReward);
+            bool success2 = i_usdc.transfer(msg.sender, arbiterReward);
+
+            if (!success || !success2) {
+                revert TaskManager__FundsTransferFailed();
+            }
+        }
+
+        _finishTask(0);
+        _finishWork();
+
+        arbiterContract.markConflictAsResolved(msg.sender, remarks);
+
+        arbiterAssigned = address(0);
+    }
+
+
+    function _finishTask(uint256 rating) private {
         s_taskVersionCounter = 0;
         tasks[s_taskCounter].status = Status.FINISHED;
 
-        taskRating[s_taskCounter] = rating; // rating
+        taskRating[s_taskCounter] = rating;
 
         emit TaskFinished(
             s_taskCounter,
@@ -421,13 +501,13 @@ contract TaskManager {
         );
     }
 
-    function finishWork() external onlyClient lastTaskFinished isActive {
+    function _finishWork() private {
         uint256 overallRating = 0;
         for (uint256 i = 1; i <= s_taskCounter; i++) {
             overallRating += taskRating[i];
         }
-        overallRating *= 100;
-        overallRating /= s_taskCounter;
+
+        overallRating = (overallRating * 100) / s_taskCounter;
 
         builderBuddy.markOrderAsCompleted(i_orderId, overallRating);
 

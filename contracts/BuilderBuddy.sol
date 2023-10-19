@@ -4,6 +4,7 @@ pragma solidity 0.8.19;
 
 import { UserRegistration } from "./UserRegistration.sol";
 import { TaskManager } from "./TaskManager.sol";
+import { ArbiterContract } from "./ArbiterContract.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /// @title Builder Buddy Smart Contract
@@ -71,6 +72,7 @@ contract BuilderBuddy is UserRegistration {
     error BuilderBuddy__ContractorIneligible();
     error BuilderBuddy__OrderCantHavePastDate();
     error BuilderBuddy__OrderNotFound();
+    error BuilderBuddy__TokenTransferFailed();
 
     // State Variables
     uint256 private orderCounter;
@@ -78,6 +80,7 @@ contract BuilderBuddy is UserRegistration {
     mapping(uint256 orderId => CustomerOrder order) private orders;
     mapping(uint8 level => LevelRequirements) private levelRequirements;
     IERC20 private immutable i_usdc;
+    address private immutable i_arbiterContract;
 
     // Events
     event OrderCreated(
@@ -92,6 +95,7 @@ contract BuilderBuddy is UserRegistration {
     event OrderConfirmed(uint256 indexed orderId, address indexed contractor);
     event ContractorStaked(address indexed contractor);
     event ContractorUnstaked(address indexed contractor);
+    event RefundedWithCollateral(uint256 indexed orderId, address indexed user, bytes12 indexed contractor);
 
     // Modifiers
     modifier orderExists(uint256 orderId) {
@@ -109,10 +113,15 @@ contract BuilderBuddy is UserRegistration {
     }
 
     modifier isContractorValid(bytes12 contractorUserId) {
-        if (contractors[contractorUserId].isAssigned) {
+        Contractor memory contr = contractors[contractorUserId];
+
+        if (contr.isAssigned) {
             revert BuilderBuddy__ContractorAlreadySet();
         }
-        if (contractors[contractorUserId].level == 0) {
+        if (contr.level == 0) {
+            revert BuilderBuddy__ContractorHasNotStaked();
+        }
+        if (levelRequirements[contr.level].collateralRequired != contr.totalCollateralDeposited) {
             revert BuilderBuddy__ContractorHasNotStaked();
         }
         _;
@@ -177,8 +186,11 @@ contract BuilderBuddy is UserRegistration {
             levelRequirements[i + 1].minScore = scoreForLevel[i];
         }
 
+
         orderCounter = 0;
         i_usdc = IERC20(usdcToken);
+
+        i_arbiterContract = address(new ArbiterContract(msg.sender, address(this)));
     }
 
     // FUNCTIONS
@@ -193,16 +205,20 @@ contract BuilderBuddy is UserRegistration {
         uint8 _level
     ) external onlyContractor(contractorUserId) {
         Contractor memory cont = contractors[contractorUserId];
+        LevelRequirements memory req = levelRequirements[_level];
 
-        if (_level <= cont.level) {
+        if (_level < cont.level) {
             revert BuilderBuddy__YouCantDowngrade();
+        }
+
+        if (req.collateralRequired == cont.totalCollateralDeposited) {
+            revert BuilderBuddy__AlreadyStaked();
         }
 
         if (_level > TOTAL_LEVELS) {
             revert BuilderBuddy__AlreadyMaxedLevel();
         }
 
-        LevelRequirements memory req = levelRequirements[_level];
 
         if (cont.score < req.minScore) {
             revert BuilderBuddy__ScoreIsLess();
@@ -404,6 +420,32 @@ contract BuilderBuddy is UserRegistration {
         contractor.score += score;
     }
 
+    function transferCollateralToCustomer(uint256 orderId, address arbiter, uint256 amount) external {
+        if (msg.sender != orders[orderId].taskContract) {
+            revert BuilderBuddy__OnlyTaskContractCanCall();
+        }
+
+        bytes12 contrId = orders[orderId].contractorId;
+        address currCustomer = orders[orderId].customer;
+
+        uint256 arbiterReward = (5 * amount) / 100;
+        contractors[contrId].totalCollateralDeposited -= (amount + arbiterReward);
+
+        emit RefundedWithCollateral(orderId, currCustomer, contrId);
+        bool success = i_usdc.transfer(currCustomer, amount);
+        if (!success) {
+            revert BuilderBuddy__TokenTransferFailed();
+        }
+
+        if (arbiterReward > 0) {
+            bool success2 = i_usdc.transfer(arbiter, arbiterReward);
+
+            if (!success2) {
+                revert BuilderBuddy__TokenTransferFailed();
+            }
+        }
+    }
+
     /**
      * @dev Returns the order details corresponding to order id
      * @param orderId The order id of the customer's order
@@ -412,6 +454,10 @@ contract BuilderBuddy is UserRegistration {
         uint256 orderId
     ) external orderExists(orderId) view returns (CustomerOrder memory) {
         return orders[orderId];
+    }
+
+    function getTaskContract(uint256 orderId) external orderExists(orderId) view returns (address) {
+        return orders[orderId].taskContract;
     }
 
     /**
@@ -521,5 +567,9 @@ contract BuilderBuddy is UserRegistration {
      */
     function getOrderCounter() external view returns (uint256) {
         return orderCounter;
+    }
+
+    function getArbiterContract() external view returns (address) {
+        return i_arbiterContract;
     }
 }
