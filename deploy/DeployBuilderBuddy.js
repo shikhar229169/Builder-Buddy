@@ -24,7 +24,7 @@ module.exports = async({ getNamedAccounts, deployments }) => {
     let subId
     let donName
     let usdcToken
-    
+
     
     if (localNetworks.includes(network.name)) {
         conf = 1
@@ -34,7 +34,7 @@ module.exports = async({ getNamedAccounts, deployments }) => {
         subId = 1
         donName = 'fun-local'
         secretsEncrypted = "0x12"
-
+        
         const decimals = networkConfig[chainId].decimals
         collaterals = [2, 3, 4, 5, 6]
         for (let i in collaterals) {
@@ -43,11 +43,11 @@ module.exports = async({ getNamedAccounts, deployments }) => {
     }
     else {
         conf = 3
-
+        
         const secrets = { GC_API_KEY: process.env.GC_API_KEY }
         secretsEncrypted = await getEncryptedSecretsUrl(secrets)
         fs.writeFileSync("./encryptedSecretsUrl.txt", secretsEncrypted)
-
+        
         router = networkConfig[chainId].router
         subId = networkConfig[chainId].subId
         donName = networkConfig[chainId].donId
@@ -58,8 +58,8 @@ module.exports = async({ getNamedAccounts, deployments }) => {
             collaterals[i] *= Math.pow(10, decimals)
         }
     }
-
-
+    
+    
     // for User Registration Contract
     console.log("Deploying User Registration...")
     const args1 = [router, minScore, scorerId, source, subId, gasLimit, secretsEncrypted, donName]
@@ -69,7 +69,7 @@ module.exports = async({ getNamedAccounts, deployments }) => {
         log: true,
         waitConfirmations: conf
     })
-
+    
     console.log("Deployed at: ", userRegistrationContract.address)
     
     
@@ -83,18 +83,22 @@ module.exports = async({ getNamedAccounts, deployments }) => {
         log: true,
         waitConfirmations: conf
     })
-
+    
     console.log("Deployed at address: ", builderBuddyContract.address)
-
+    
     console.log("Setting Builder Buddy contract address in user registration...")
     const userRegistration = await ethers.getContractAt("UserRegistration", userRegistrationContract.address)
     const response = await userRegistration.setBuilderBuddy(builderBuddyContract.address)
     await response.wait(1)
     console.log("Setted up")
-
+    
+    const builderBuddy = await ethers.getContractAt("BuilderBuddy", builderBuddyContract.address)
+    const arbiterContractAddress = await builderBuddy.getArbiterContract()
+    
     if (!localNetworks.includes(network.name) && process.env.MUMBAI_API_KEY) {
         await verifyContract(builderBuddyContract.address, args2)
         await verifyContract(userRegistrationContract.address, args1)
+        await verifyContract(arbiterContractAddress, [deployer, builderBuddyContract.address])
     }
 }
 
