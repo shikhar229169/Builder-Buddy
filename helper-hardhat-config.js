@@ -11,10 +11,11 @@ const networkConfig = {
         decimals: 6
     },
     31337: {
+        name: "hardhat",
         scorerId: "5919",
         minScore: "1",
-        subId: "",
         gasLimit: "300000",
+        decimals: 6
     }
 }
 

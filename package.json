@@ -16,7 +16,7 @@
     "ethers": "5.7.2",
     "fs": "0.0.1-security",
     "hardhat": "2.12.5",
-    "hardhat-deploy": "0.11.22",
+    "hardhat-deploy": "^0.11.43",
     "hardhat-gas-reporter": "1.0.8",
     "prettier": "2.8.1",
     "prettier-plugin-solidity": "1.1.1",

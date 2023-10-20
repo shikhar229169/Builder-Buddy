@@ -18,21 +18,23 @@ contract ArbiterContract {
     error ArbiterContract__AssignedToOtherWork();
     error ArbiterContract__NotAllocatedToArbiter();
 
+    enum Status {
+        PENDING,
+        RESOLVED
+    }
+
     struct ConflictDetails {
         uint256 orderId;
         address taskManager;
+        Status status;
         string remarks;
     }
 
-    struct Arbiter {
-        address ethAddress;
-        bool isAssigned;
-    }
-
-    mapping(address => Arbiter) private arbiters;
+    mapping(bytes12 userId => address arbiter) private arbiters;
     IBuilderBuddy private builderBuddy;
     address private immutable i_owner;
-    mapping(address => ConflictDetails[]) conflictDetails;
+    mapping(bytes12 arbiterUserId => ConflictDetails[]) private conflictDetails;
+    mapping(address => bytes12 arbiterUserId) private arbiterAddrToId;
 
     // Events
     event ArbiterAdded(address indexed arbiter);
@@ -49,56 +51,84 @@ contract ArbiterContract {
         builderBuddy = IBuilderBuddy(_builderBuddyAddr);
     }
 
-    function addArbiter(address arbiter) external onlyOwner {
-        if (arbiters[arbiter].ethAddress != address(0)) {
+    function addArbiter(bytes12 userId, address arbiter) external onlyOwner {
+        if (arbiters[userId] != address(0)) {
             revert ArbiterContract__ArbiterAlreadyAdded();
         }
 
-        arbiters[arbiter] = Arbiter({
-            ethAddress: arbiter,
-            isAssigned: false
-        });
+        if (arbiterAddrToId[arbiter] != bytes12(0)) {
+            revert ArbiterContract__ArbiterAlreadyAdded();
+        }
+
+        arbiters[userId] = arbiter;
+        arbiterAddrToId[arbiter] = userId;
 
         emit ArbiterAdded(arbiter);
     }
 
-    function assignArbiterToResolveConflict(address arbiter, uint256 orderId) external {
+    function assignArbiterToResolveConflict(address arbiter, uint256 orderId) external returns (uint256) {
+        bytes12 arbiterId = arbiterAddrToId[arbiter];
+
+        if (arbiterId == bytes12(0)) {
+            revert ArbiterContract__ArbiterNotExist();
+        }
+
         address taskManagerContract = builderBuddy.getTaskContract(orderId);
+        address arbiterAddr = arbiters[arbiterId];
 
         if (msg.sender != taskManagerContract) {
             revert ArbiterContract__NotTaskManager();
         }
 
-        if (arbiters[arbiter].ethAddress == address(0)) {
+        if (arbiterAddr == address(0)) {
             revert ArbiterContract__ArbiterNotExist();
         }
-
-        if (arbiters[arbiter].isAssigned) {
-            revert ArbiterContract__AssignedToOtherWork();
-        }
-
-        Arbiter storage currArbiter = arbiters[arbiter];
-
-        currArbiter.isAssigned = true;
 
         ConflictDetails memory details = ConflictDetails({
             orderId: orderId,
             taskManager: taskManagerContract,
+            status: Status.PENDING,
             remarks: ""
         });
 
-        conflictDetails[arbiter].push(details);
+        conflictDetails[arbiterId].push(details);
+
+        return conflictDetails[arbiterId].length - 1;
     }
 
-    function markConflictAsResolved(address arbiter, string memory remarks) external {
-        uint256 conflictIdx = conflictDetails[arbiter].length - 1;
-        ConflictDetails memory details = conflictDetails[arbiter][conflictIdx];
+    function markConflictAsResolved(address arbiter, string memory remarks, uint256 conflictIdx) external {
+        bytes12 arbiterUserId = arbiterAddrToId[arbiter];
+        ConflictDetails memory details = conflictDetails[arbiterUserId][conflictIdx];
 
         if (msg.sender != details.taskManager) {
             revert ArbiterContract__NotAllocatedToArbiter();
         }
 
-        arbiters[arbiter].isAssigned = false;
-        conflictDetails[arbiter][conflictIdx].remarks = remarks;
+        conflictDetails[arbiterUserId][conflictIdx].remarks = remarks;
+        conflictDetails[arbiterUserId][conflictIdx].status = Status.RESOLVED;
+    }
+
+    function getBuilderBuddy() external view returns (address) {
+        return address(builderBuddy);
+    }
+
+    function getOwner() external view returns (address) {
+        return i_owner;
+    }
+
+    function getArbiterAddress(bytes12 userId) external view returns (address) {
+        return arbiters[userId];
+    }
+
+    function getArbiterUserId(address arbiter) external view returns (bytes12) {
+        return arbiterAddrToId[arbiter];
+    }
+
+    function getConflictDetails(bytes12 arbiterId, uint256 conflictIdx) external view returns (ConflictDetails memory) {
+        return conflictDetails[arbiterId][conflictIdx];
+    }
+
+    function getAllArbiterConflicts(bytes12 arbiterId) external view returns (ConflictDetails[] memory) {
+        return conflictDetails[arbiterId];
     }
 }

@@ -107,6 +107,7 @@ contract TaskManager {
     ArbiterContract private arbiterContract;
 
     address private arbiterAssigned;
+    uint256 private conflictIdx;
 
     // Errors
 
@@ -165,6 +166,8 @@ contract TaskManager {
     error TaskManager__OnlyArbiterCanResolveDisputes();
     error TaskManager__RefundCantBeMoreThanCost();
     error TaskManager__LastTaskAlreadyFinished();
+    error TaskManager__ArbiterCantBeClientOrContr();
+    error TaskManager__LastTaskNotApproved();
 
     /**
      * @dev Modifier to ensure the previous task is finished before executing a function.
@@ -434,12 +437,22 @@ contract TaskManager {
         _finishWork();
     }
 
-    function involveArbiter(address arbiter) external isActive {
-        if (msg.sender != s_clientAddress && msg.sender != s_contractorAddress) {
+    function involveArbiter(address arbiter) external isActive hasTasks {
+        if (msg.sender != s_clientAddress) {
             revert TaskManager__NeitherContractorNorClient();
         }
 
-        arbiterContract.assignArbiterToResolveConflict(arbiter, i_orderId);
+        Task memory lastTask = tasks[s_taskCounter];
+
+        if (lastTask.status == Status.INITIATED) {
+            revert TaskManager__LastTaskNotApproved();
+        }
+
+        if (arbiter == s_clientAddress || arbiter == s_contractorAddress) {
+            revert TaskManager__ArbiterCantBeClientOrContr();
+        }
+
+        conflictIdx = arbiterContract.assignArbiterToResolveConflict(arbiter, i_orderId);
 
         arbiterAssigned = arbiter;
 
@@ -451,15 +464,11 @@ contract TaskManager {
             revert TaskManager__OnlyArbiterCanResolveDisputes();
         }
 
-
         // now there are 2 scenarios, either the contractor was malicious, or the client didn't called finishTask or finishWork
         Task memory lastTask = tasks[s_taskCounter];
-        if (lastTask.status == Status.FINISHED) {
-            revert TaskManager__LastTaskAlreadyFinished();
-        }
 
         if (lastTask.status == Status.INITIATED) {
-            revert TaskManager__NotApproved();
+            revert TaskManager__LastTaskNotApproved();
         }
 
         if (lastTask.status == Status.PENDING) {
@@ -482,7 +491,7 @@ contract TaskManager {
         _finishTask(0);
         _finishWork();
 
-        arbiterContract.markConflictAsResolved(msg.sender, remarks);
+        arbiterContract.markConflictAsResolved(msg.sender, remarks, conflictIdx);
 
         arbiterAssigned = address(0);
     }

@@ -1,4 +1,5 @@
-require("@nomicfoundation/hardhat-toolbox");
+require("@nomicfoundation/hardhat-toolbox")
+require("hardhat-deploy")
 require("dotenv").config()
 
 const MUMBAI_RPC_URL = process.env.MUMBAI_RPC_URL
@@ -12,13 +13,13 @@ module.exports = {
     settings: {
       optimizer: {
         enabled: true,
-        runs: 37,
+        runs: 200,
       },
-      "viaIR": true,
+      viaIR: true
     }
   },
 
-  defaultNetwork: "mumbai",
+  defaultNetwork: "hardhat",
 
   networks: {
     hardhat: {},

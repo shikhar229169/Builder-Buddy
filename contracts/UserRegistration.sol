@@ -26,7 +26,6 @@ contract UserRegistration is FunctionsClient {
     struct Customer {
         address ethAddress;
         string name;
-        uint256[] worksRequested;
     }
 
     struct Contractor {
@@ -36,13 +35,15 @@ contract UserRegistration is FunctionsClient {
         uint8 level;
         bool isAssigned;
         uint256 totalCollateralDeposited;
-        uint256[] acceptedContracts;        
     }
 
     // Errors
     error UserRegistration__AlreadyRegistered();
     error UserRegistration__NotOwner();
     error UserRegistration__InvalidUserId();
+    error UserRegistration__ContractorNotFound();
+    error UserRegistration__BuilderBuddyAlreadySet();
+    error UserRegistration__CallerNotBuilderBuddy();
 
     // State Variables
 
@@ -56,6 +57,7 @@ contract UserRegistration is FunctionsClient {
     bytes32 public donId;
     bytes public secrets;
     address public owner;
+    address public builderBuddy;
 
 
     mapping(bytes12 userId => Customer) public customers;
@@ -79,6 +81,13 @@ contract UserRegistration is FunctionsClient {
         _;
     }
 
+    modifier onlyBuilderBuddy() {
+        if (msg.sender != builderBuddy) {
+            revert UserRegistration__CallerNotBuilderBuddy();
+        }
+        _;
+    }
+
     constructor(address router, uint256 _minimumScore, string memory _scorerId, string memory _source, uint64 _subscriptionId, uint32 _gasLimit, bytes memory _secrets, string memory donName) FunctionsClient(router) {
         minimumScore = _minimumScore;
         scorerId = _scorerId;
@@ -90,11 +99,18 @@ contract UserRegistration is FunctionsClient {
         owner = msg.sender;
     }
 
+    function setBuilderBuddy(address _builderBuddy) external onlyOwner {
+        if (builderBuddy != address(0)) {
+            revert UserRegistration__BuilderBuddyAlreadySet();
+        }
+
+        builderBuddy = _builderBuddy;
+    }
+
     function register(bytes12 userId, Role role, string memory name) external {
         if (userId == bytes12(0)) {
             revert UserRegistration__InvalidUserId();
         }
-
 
         if (customers[userId].ethAddress != address(0) || contractors[userId].ethAddress != address(0)) {
             revert UserRegistration__AlreadyRegistered();
@@ -144,8 +160,7 @@ contract UserRegistration is FunctionsClient {
                 if (userInfo.role == Role.CUSTOMER) {
                     customers[userInfo.userId] = Customer({
                         ethAddress: userInfo.ethAddress,
-                        name: userInfo.name,
-                        worksRequested: new uint256[](0)
+                        name: userInfo.name
                     });
                 }
                 else if (userInfo.role == Role.CONTRACTOR) {
@@ -155,8 +170,7 @@ contract UserRegistration is FunctionsClient {
                         score: 0,
                         level: 0,
                         isAssigned: false,
-                        totalCollateralDeposited: 0,
-                        acceptedContracts: new uint256[](0)
+                        totalCollateralDeposited: 0
                     });
                 }
 
@@ -171,6 +185,54 @@ contract UserRegistration is FunctionsClient {
         else {
             emit RegistrationUnsuccessful(userInfo.ethAddress, 0);
         }
+    }
+
+    function setLevelAndCollateral(bytes12 _contractorId, uint8 _level, uint256 _collateral) external onlyBuilderBuddy {
+        contractors[_contractorId].level = _level;
+        contractors[_contractorId].totalCollateralDeposited = _collateral;
+    }
+
+    function decrementCollateral(bytes12 _contractorId, uint256 _collateral) external onlyBuilderBuddy {
+        contractors[_contractorId].totalCollateralDeposited -= _collateral;
+    }
+
+    function setContractorAssignStatus(bytes12 _contractorId, bool _status) external onlyBuilderBuddy {
+        contractors[_contractorId].isAssigned = _status;
+    }
+
+    function incrementContractorScore(bytes12 _contractorId, uint256 _score) external onlyBuilderBuddy {
+        contractors[_contractorId].score += _score;
+    }
+
+    // Getters
+    /**
+     * @dev Returns the total collateral deposited by contractor
+     * @param contractorId The user id of contractor
+     */
+    function getCollateralDeposited(
+        bytes12 contractorId
+    ) external view returns (uint256) {
+        if (contractors[contractorId].ethAddress == address(0)) {
+            revert UserRegistration__ContractorNotFound();
+        }
+
+        return contractors[contractorId].totalCollateralDeposited;
+    }
+
+    function getCustomerInfo(bytes12 userId) external view returns (Customer memory) {
+        return customers[userId];
+    }
+
+    function getContractorInfo(bytes12 userId) external view returns (Contractor memory) {
+        return contractors[userId];
+    }
+
+    function getCustomerAddr(bytes12 userId) external view returns (address) {
+        return customers[userId].ethAddress;
+    }
+
+    function getContractorAddr(bytes12 userId) external view returns (address) {
+        return contractors[userId].ethAddress;
     }
 
     function setSecrets(bytes memory newSecrets) external onlyOwner {

@@ -9,7 +9,7 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /// @title Builder Buddy Smart Contract
 /// @notice This contract manages users registration and orders
-contract BuilderBuddy is UserRegistration {
+contract BuilderBuddy {
     // Enums
     enum Status {
         PENDING,
@@ -73,14 +73,18 @@ contract BuilderBuddy is UserRegistration {
     error BuilderBuddy__OrderCantHavePastDate();
     error BuilderBuddy__OrderNotFound();
     error BuilderBuddy__TokenTransferFailed();
+    error BuilderBuddy__OrderCantBeCancelled();
 
     // State Variables
     uint256 private orderCounter;
     uint256 private constant TOTAL_LEVELS = 5;
     mapping(uint256 orderId => CustomerOrder order) private orders;
+    mapping(bytes12 customerId => uint256[] orderId) private customerOrders;
+    mapping(bytes12 contractorId => uint256[] orderId) private contractorAcceptedOrders;
     mapping(uint8 level => LevelRequirements) private levelRequirements;
     IERC20 private immutable i_usdc;
     address private immutable i_arbiterContract;
+    UserRegistration private immutable i_userReg;
 
     // Events
     event OrderCreated(
@@ -88,6 +92,7 @@ contract BuilderBuddy is UserRegistration {
         uint256 indexed orderId,
         string title
     );
+    event OrderCancelled(uint256 indexed orderId);
     event ContractorAssigned(
         uint256 indexed orderId,
         address indexed contractor
@@ -106,14 +111,14 @@ contract BuilderBuddy is UserRegistration {
     }
 
     modifier onlyCustomer(bytes12 userId) {
-        if (customers[userId].ethAddress != msg.sender) {
+        if (i_userReg.getCustomerAddr(userId) != msg.sender) {
             revert BuilderBuddy__InvalidCustomer();
         }
         _;
     }
 
     modifier isContractorValid(bytes12 contractorUserId) {
-        Contractor memory contr = contractors[contractorUserId];
+        UserRegistration.Contractor memory contr = i_userReg.getContractorInfo(contractorUserId);
 
         if (contr.isAssigned) {
             revert BuilderBuddy__ContractorAlreadySet();
@@ -128,7 +133,7 @@ contract BuilderBuddy is UserRegistration {
     }
 
     modifier onlyContractor(bytes12 userId) {
-        if (contractors[userId].ethAddress != msg.sender) {
+        if (i_userReg.getContractorAddr(userId) != msg.sender) {
             revert BuilderBuddy__InvalidContractor();
         }
         _;
@@ -136,29 +141,11 @@ contract BuilderBuddy is UserRegistration {
 
     // Constructor
     constructor(
-        address router,
-        uint256 _minimumScore,
-        string memory _scorerId,
-        string memory _source,
-        uint64 _subscriptionId,
-        uint32 _gasLimit,
-        bytes memory _secrets,
-        string memory donName,
+        address userRegAddr,
         uint256[] memory collateralsForLevel,
         uint256[] memory scoreForLevel,
         address usdcToken
-    )
-        UserRegistration(
-            router,
-            _minimumScore,
-            _scorerId,
-            _source,
-            _subscriptionId,
-            _gasLimit,
-            _secrets,
-            donName
-        )
-    {
+    ) {
         if (collateralsForLevel.length != 5) {
             revert BuilderBuddy__InvalidLevelsConfig();
         }
@@ -180,16 +167,14 @@ contract BuilderBuddy is UserRegistration {
                 revert BuilderBuddy__InvalidLevelsConfig();
             }
 
-            levelRequirements[i + 1].collateralRequired = collateralsForLevel[
-                i
-            ];
+            levelRequirements[i + 1].collateralRequired = collateralsForLevel[i];
             levelRequirements[i + 1].minScore = scoreForLevel[i];
         }
 
 
         orderCounter = 0;
         i_usdc = IERC20(usdcToken);
-
+        i_userReg = UserRegistration(userRegAddr);
         i_arbiterContract = address(new ArbiterContract(msg.sender, address(this)));
     }
 
@@ -204,7 +189,7 @@ contract BuilderBuddy is UserRegistration {
         bytes12 contractorUserId,
         uint8 _level
     ) external onlyContractor(contractorUserId) {
-        Contractor memory cont = contractors[contractorUserId];
+        UserRegistration.Contractor memory cont = i_userReg.getContractorInfo(contractorUserId);
         LevelRequirements memory req = levelRequirements[_level];
 
         if (_level < cont.level) {
@@ -235,8 +220,7 @@ contract BuilderBuddy is UserRegistration {
             revert BuilderBuddy__StakingFailed();
         }
 
-        contractors[contractorUserId].totalCollateralDeposited = req.collateralRequired;
-        contractors[contractorUserId].level = _level;
+        i_userReg.setLevelAndCollateral(contractorUserId, _level, req.collateralRequired);
     }
 
     /**
@@ -253,15 +237,14 @@ contract BuilderBuddy is UserRegistration {
         onlyContractor(contractorUserId)
         isContractorValid(contractorUserId)
     {
-        Contractor memory cont = contractors[contractorUserId];
+        UserRegistration.Contractor memory cont = i_userReg.getContractorInfo(contractorUserId);
         uint8 currLevel = cont.level;
 
         if (_level >= currLevel) {
             revert BuilderBuddy__YouCantUpgrade();
         }
 
-        uint256 remainingStakedAmount = levelRequirements[_level]
-            .collateralRequired;
+        uint256 remainingStakedAmount = levelRequirements[_level].collateralRequired;
         uint256 amount = cont.totalCollateralDeposited - remainingStakedAmount;
 
         emit ContractorUnstaked(msg.sender);
@@ -270,8 +253,7 @@ contract BuilderBuddy is UserRegistration {
             revert BuilderBuddy__WithdrawFailed();
         }
 
-        contractors[contractorUserId].level = _level;
-        contractors[contractorUserId].totalCollateralDeposited = remainingStakedAmount;
+        i_userReg.setLevelAndCollateral(contractorUserId, _level, remainingStakedAmount);
     }
 
     /**
@@ -321,9 +303,33 @@ contract BuilderBuddy is UserRegistration {
             level: _level
         });
 
-        customers[userId].worksRequested.push(orderId);
+        customerOrders[userId].push(orderId);
 
         emit OrderCreated(msg.sender, orderId, title);
+    }
+
+    /**
+     * @notice Allows customer to cancel an order
+     * @notice Only allowed if it is not assigned to a contractor
+     * @param userId The userId of customer
+     * @param orderId The order Id to cancel
+     */
+    function cancelOrder(bytes12 userId, uint256 orderId) external onlyCustomer(userId) orderExists(orderId) {
+        CustomerOrder memory currOrder = orders[orderId];
+
+        if (msg.sender != currOrder.customer) {
+            revert BuilderBuddy__CallerNotOwnerOfOrder();
+        }
+
+        if (currOrder.taskContract != address(0)) {
+            revert BuilderBuddy__OrderCantBeCancelled();
+        }
+
+        orders[orderId].status = Status.REJECTED;
+        orders[orderId].contractor = address(0);
+        orders[orderId].contractorId = bytes12(0);
+
+        emit OrderCancelled(orderId);
     }
 
     /**
@@ -342,14 +348,16 @@ contract BuilderBuddy is UserRegistration {
             revert BuilderBuddy__CallerNotOwnerOfOrder();
         }
 
-        if (orders[orderId].level > contractors[contractorId].level) {
+        UserRegistration.Contractor memory contr = i_userReg.getContractorInfo(contractorId);
+
+        if (orders[orderId].level > contr.level) {
             revert BuilderBuddy__ContractorIneligible();
         }
         if (orders[orderId].status != Status.PENDING) {
             revert BuilderBuddy__ContractorAlreadySet();
         }
 
-        address appointedContractorAddress = contractors[contractorId].ethAddress;
+        address appointedContractorAddress = contr.ethAddress;
 
         if (appointedContractorAddress == address(0)) {
             revert BuilderBuddy__ContractorNotFound();
@@ -392,11 +400,11 @@ contract BuilderBuddy is UserRegistration {
 
         orders[orderId].status = Status.ASSIGNED;
 
-        contractors[contractorUserId].isAssigned = true;
-        contractors[contractorUserId].acceptedContracts.push(orderId);
+        i_userReg.setContractorAssignStatus(contractorUserId, true);
+        contractorAcceptedOrders[contractorUserId].push(orderId);
 
         // deploy the task contract
-        TaskManager taskManager = new TaskManager(orderId, currOrder.customerId, currOrder.contractorId, currOrder.customer, currOrder.contractor, currOrder.level, contractors[contractorUserId].totalCollateralDeposited, i_usdc, address(this));
+        TaskManager taskManager = new TaskManager(orderId, currOrder.customerId, currOrder.contractorId, currOrder.customer, currOrder.contractor, currOrder.level, i_userReg.getCollateralDeposited(contractorUserId), i_usdc, address(this));
 
         // update the task contract address
         orders[orderId].taskContract = address(taskManager);
@@ -413,11 +421,12 @@ contract BuilderBuddy is UserRegistration {
         if (msg.sender != orders[orderId].taskContract) {
             revert BuilderBuddy__OnlyTaskContractCanCall();
         }
-        CustomerOrder storage order = orders[orderId];
-        order.status = Status.FINISHED;
-        Contractor storage contractor = contractors[order.contractorId];
-        contractor.isAssigned = false;
-        contractor.score += score;
+
+        CustomerOrder memory order = orders[orderId];
+        orders[orderId].status = Status.FINISHED;
+        
+        i_userReg.setContractorAssignStatus(order.contractorId, false);
+        i_userReg.incrementContractorScore(order.contractorId, score);
     }
 
     function transferCollateralToCustomer(uint256 orderId, address arbiter, uint256 amount) external {
@@ -429,7 +438,7 @@ contract BuilderBuddy is UserRegistration {
         address currCustomer = orders[orderId].customer;
 
         uint256 arbiterReward = (5 * amount) / 100;
-        contractors[contrId].totalCollateralDeposited -= (amount + arbiterReward);
+        i_userReg.decrementCollateral(contrId, amount + arbiterReward);
 
         emit RefundedWithCollateral(orderId, currCustomer, contrId);
         bool success = i_usdc.transfer(currCustomer, amount);
@@ -468,18 +477,15 @@ contract BuilderBuddy is UserRegistration {
     function getAllCustomerOrders(
         bytes12 customerUserId
     ) external view returns (CustomerOrder[] memory) {
-        uint256[] memory customerOrderIds = customers[customerUserId]
-            .worksRequested;
+        uint256[] memory customerOrderIds = customerOrders[customerUserId];
         uint256 orderLength = customerOrderIds.length;
-        CustomerOrder[] memory customerOrders = new CustomerOrder[](
-            orderLength
-        );
+        CustomerOrder[] memory currCustomerOrders = new CustomerOrder[](orderLength);
 
         for (uint256 i = 0; i < orderLength; i++) {
-            customerOrders[i] = orders[customerOrderIds[i]];
+            currCustomerOrders[i] = orders[customerOrderIds[i]];
         }
 
-        return customerOrders;
+        return currCustomerOrders;
     }
 
     /**
@@ -493,20 +499,6 @@ contract BuilderBuddy is UserRegistration {
         }
 
         return currOrder;
-    }
-
-    /**
-     * @dev Returns the total collateral deposited by contractor
-     * @param contractorId The user id of contractor
-     */
-    function getCollateralDeposited(
-        bytes12 contractorId
-    ) external view returns (uint256) {
-        if (contractors[contractorId].ethAddress == address(0)) {
-            revert BuilderBuddy__ContractorNotFound();
-        }
-
-        return contractors[contractorId].totalCollateralDeposited;
     }
 
     /**
@@ -567,6 +559,10 @@ contract BuilderBuddy is UserRegistration {
      */
     function getOrderCounter() external view returns (uint256) {
         return orderCounter;
+    }
+
+    function getUserRegistrationContract() external view returns (address) {
+        return address(i_userReg);
     }
 
     function getArbiterContract() external view returns (address) {

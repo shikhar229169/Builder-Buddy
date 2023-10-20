@@ -6,7 +6,6 @@ require("dotenv").config()
 async function getEncryptedSecretsUrl(secrets) {
     const chainId = network.config.chainId
 
-    // const accounts = await ethers.getSigners()
 
     const provider = new ethers.providers.JsonRpcProvider(network.config.url);
     
