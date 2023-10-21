@@ -120,6 +120,10 @@ contract BuilderBuddy {
     modifier isContractorValid(bytes12 contractorUserId) {
         UserRegistration.Contractor memory contr = i_userReg.getContractorInfo(contractorUserId);
 
+        if (contr.ethAddress == address(0)) {
+            revert BuilderBuddy__ContractorNotFound();
+        }
+
         if (contr.isAssigned) {
             revert BuilderBuddy__ContractorAlreadySet();
         }
@@ -358,10 +362,6 @@ contract BuilderBuddy {
         }
 
         address appointedContractorAddress = contr.ethAddress;
-
-        if (appointedContractorAddress == address(0)) {
-            revert BuilderBuddy__ContractorNotFound();
-        }
 
         if (appointedContractorAddress == orders[orderId].contractor) {
             revert BuilderBuddy__ContractorAlreadySet();

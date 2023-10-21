@@ -48,11 +48,13 @@ async function register(userRegistration, functionsMock, userId, role, name) {
         let contractor;
         let clientId
         let contractorId
+        let attackerId
 
         let attacker;
         
         let clientBB;
         let contractorBB;
+        let attackerBB;
 
         let clientUR;
         let contractorUR;
@@ -81,6 +83,7 @@ async function register(userRegistration, functionsMock, userId, role, name) {
 
             clientId = getRandomId()
             contractorId = getRandomId()
+            attackerId = getRandomId()
 
             await deployments.fixture(["main"]);
 
@@ -98,6 +101,7 @@ async function register(userRegistration, functionsMock, userId, role, name) {
             
             clientBB = builderBuddy.connect(client);
             contractorBB = builderBuddy.connect(contractor);
+            attackerBB = builderBuddy.connect(attacker);
 
             clientUR = userRegistration.connect(client);
             contractorUR = userRegistration.connect(contractor);
@@ -223,6 +227,40 @@ async function register(userRegistration, functionsMock, userId, role, name) {
                     assert.equal(data.contractorId, 0x00)
                     assert.equal(data.taskContract, 0)
                 })
+
+                it("checking getAllCustomerOrders Test", async() => {
+                    await clientBB.createOrder(clientId, title, desc, category, locality, level, budget, expectedStartDate);
+                    let currCustomerOrders = await clientBB.getAllCustomerOrders(clientId);
+                    assert.equal(currCustomerOrders.length, 1);
+                });
+
+                it("reverts if Customer is not register", async() => {
+                    let newCustomerId = getRandomId();
+                    attackerBB = builderBuddy.connect(attacker);
+                    
+
+                    await expect(attackerBB.createOrder(newCustomerId, title, desc, category, locality, level, budget, expectedStartDate))
+                        .to.be.revertedWithCustomError(builderBuddy, "BuilderBuddy__InvalidCustomer");
+                
+                });
+
+                it("revets if clientId is not of Caller", async() => {
+                    attackerBB = builderBuddy.connect(attacker);
+                    await expect(attackerBB.createOrder(clientId, title, desc, category, locality, level, budget, expectedStartDate))
+                        .to.be.revertedWithCustomError(builderBuddy, "BuilderBuddy__InvalidCustomer");
+                });
+
+                it("reverts if level is not valid", async() => {
+                    let newLevel = 6;
+                    await expect(clientBB.createOrder(clientId, title, desc, category, locality, newLevel, budget, expectedStartDate))
+                        .to.be.revertedWithCustomError(builderBuddy, "BuilderBuddy__InvalidLevel");
+                });
+
+                it("reverts if Time is not valid", async() => {
+                    let newExpectedStartDate = parseInt(Date.now() / 1000) - 100;
+                    await expect(clientBB.createOrder(clientId, title, desc, category, locality, level, budget, newExpectedStartDate))
+                        .to.be.revertedWithCustomError(builderBuddy, "BuilderBuddy__OrderCantHavePastDate");
+                });
             })
 
             describe("Confirm User Order Testing", () => {
@@ -308,5 +346,106 @@ async function register(userRegistration, functionsMock, userId, role, name) {
                     assert.equal(taskCounter, 0)
                 })
             })
+
+            describe("Assign Contractor To Order Test", () => {
+                beforeEach(async() => {
+                    // Register Customer
+                    await register(clientUR, mocksFunctions, clientId, CUSTOMER, "billa69");
+
+                    
+                    let title = "I want to build a house"
+                    let desc = "I want to construct a dream house"
+                    let category = 0                // construction
+                    let locality = "Agra"
+                    let level = 1
+                    let budget = 6969696969
+                    let expectedStartDate = parseInt(Date.now() / 1000) + 100
+                    await clientBB.createOrder(clientId, title, desc, category, locality, level, budget, expectedStartDate);
+                    
+                    let newLevel = 2;
+                    await clientBB.createOrder(clientId, title, desc, category, locality, newLevel, budget, expectedStartDate);
+                })
+
+                it("reverts if contractor is not registered", async() => {
+                    let newContractorId = getRandomId();
+                    await expect(clientBB.assignContractorToOrder(clientId, 0, newContractorId))
+                        .to.be.revertedWithCustomError(builderBuddy, "BuilderBuddy__ContractorNotFound");
+                });
+
+                it("reverts if client is not caller", async() => {
+                    await expect(attackerBB.assignContractorToOrder(clientId, 0, contractorId))
+                        .to.be.revertedWithCustomError(builderBuddy, "BuilderBuddy__InvalidCustomer");
+                });
+                
+                it("reverts if contractor has not stacked", async() => {
+                    await register(contractorUR, mocksFunctions, contractorId, CONTRACTOR, "bhai me contractor hu");
+
+                    await expect(clientBB.assignContractorToOrder(clientId, 0, contractorId))
+                        .to.be.revertedWithCustomError(builderBuddy, "BuilderBuddy__ContractorHasNotStaked");
+                });
+
+                it("reverts if contractor is assigned to an order", async() => {
+                    await register(contractorUR, mocksFunctions, contractorId, CONTRACTOR, "bhai me contractor hu");
+                    
+                    let level = 1;
+                    const approveResponse = await contractorUsdc.approve(builderBuddy.address, collaterals[level])
+                    await approveResponse.wait(1)
+
+                    const stakeResponse = await contractorBB.incrementLevelAndStakeUSDC(contractorId, 1);
+                    await stakeResponse.wait(1)
+
+                    const assignContractor = await clientBB.assignContractorToOrder(clientId, 0, contractorId);
+                    await assignContractor.wait(1)
+
+                    await contractorBB.confirmUserOrder(contractorId, 0);
+
+                    await expect(clientBB.assignContractorToOrder(clientId, 0, contractorId))
+                        .to.be.revertedWithCustomError(builderBuddy, "BuilderBuddy__ContractorAlreadySet");
+                });
+
+                it("reverts if order level is greater than contractor level", async() => {
+                    await register(contractorUR, mocksFunctions, contractorId, CONTRACTOR, "bhai me contractor hu");
+                    
+                    let level = 1;
+                    const approveResponse = await contractorUsdc.approve(builderBuddy.address, collaterals[level])
+                    await approveResponse.wait(1)
+
+                    const stakeResponse = await contractorBB.incrementLevelAndStakeUSDC(contractorId, 1);
+                    await stakeResponse.wait(1)
+
+                    await expect(clientBB.assignContractorToOrder(clientId, 1, contractorId))
+                        .to.be.revertedWithCustomError(builderBuddy, "BuilderBuddy__ContractorIneligible");
+                });
+
+                it("contractor is assigned to order and store in data structure", async() => {
+                    await register(contractorUR, mocksFunctions, contractorId, CONTRACTOR, "bhai me contractor hu");
+
+                    let level = 1;
+                    const approveResponse = await contractorUsdc.approve(builderBuddy.address, collaterals[level])
+                    await approveResponse.wait(1)
+
+                    const stakeResponse = await contractorBB.incrementLevelAndStakeUSDC(contractorId, 1);
+                    await stakeResponse.wait(1)
+
+                    await expect(clientBB.assignContractorToOrder(clientId, 0, contractorId)).to.emit(builderBuddy, "ContractorAssigned").withArgs(0, contractor.address);
+                    
+                    let orderData = await clientBB.getOrder(0); 
+                    assert.equal(orderData.contractor, contractor.address);
+                    assert.equal(orderData.contractorId, contractorId);
+                });
+            });
+
+            // describe("confirm User Order Test", () => {
+                
+            // })
+
+            describe("getRequiredCollateral Test", function () {
+                it("Should give correct collateral", async function () {
+                    for(let level = 1; level <= 5; level++){
+                        let collateral = await builderBuddy.getRequiredCollateral(level);
+                        assert.equal(collateral.toString(), collaterals[level - 1], "Collateral is not correct");
+                    }
+                });
+            });
         });
   });
