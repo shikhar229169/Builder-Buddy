@@ -77,7 +77,7 @@ const { assert, expect } = require("chai");
                     assert.equal(builderBuddyAddress, builderBuddy.address, "builderBuddyAddress does not match");
                 }
                 else {
-                    // await expect(userRegistration.setBuilderBuddy(builderBuddy.address)).to.be.revertedWithCustomError(userRegistration, "UserRegistration__BuilderBuddyAlreadySet()");
+                  await expect(userRegistration.setBuilderBuddy(builderBuddy.address)).to.be.revertedWithCustomError(userRegistration, "UserRegistration__BuilderBuddyAlreadySet");
                 }
             });
         });
