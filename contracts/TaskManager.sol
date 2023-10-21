@@ -654,4 +654,8 @@ contract TaskManager {
     function isWorkFinished() external view returns (bool) {
         return (!s_isContractActive);
     }
+
+    function getBuilderBuddyAddr() external view returns (address) {
+        return address(builderBuddy);
+    }
 }

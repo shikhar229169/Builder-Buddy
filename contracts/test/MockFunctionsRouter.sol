@@ -51,6 +51,8 @@ contract MockFunctionsRouter {
         revert MockFunctionsRouter__AlreadyServed();
     }
 
+    reqInfo[reqId].served = true;
+
     uint256 score = 100;
 
 

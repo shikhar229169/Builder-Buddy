@@ -5,6 +5,32 @@ const {
 } = require("../../helper-hardhat-config.js");
 const { assert, expect } = require("chai");
 
+function getRandomId() {
+    userId = "0x"
+
+    for (let i = 0; i < 24; i++) {
+        let randomValue = Math.floor((Math.random() * 100) % 15);
+        if (randomValue <= 9) {
+            userId += String.fromCharCode(48 + randomValue);
+        }
+        else {
+            userId += String.fromCharCode(97 + randomValue - 9); 
+        }
+    }
+
+    return userId
+}
+
+async function register(userRegistration, functionsMock, userId, role, name) {
+    const response = await userRegistration.register(userId, role, name)
+    const receipt = await response.wait(1)
+
+    const reqId = receipt.logs[1].topics[1]
+
+    const fulfillResponse = await functionsMock.fulfillRequest(reqId)
+    const fulfillReceipt = await fulfillResponse.wait(1)
+}
+
 !localNetworks.includes(network.name)
   ? describe.skip
   : describe("BuilderBuddy Tests", function () {
@@ -17,8 +43,12 @@ const { assert, expect } = require("chai");
         let chainId = network.config.chainId;
         let constructorData = networkConfig[chainId];
         const donName = 'fun-local'
+
         let client;
         let contractor;
+        let clientId
+        let contractorId
+
         let attacker;
         
         let clientBB;
@@ -30,6 +60,10 @@ const { assert, expect } = require("chai");
         let clientUsdc;
         let contractorUsdc;
 
+        const CUSTOMER = 0
+        const CONTRACTOR = 1
+
+        const USDC_START_BALANCE = 1e9
         let collaterals = [2, 3, 4, 5, 6];
         let decimals = constructorData.decimals;
         for (let i in collaterals) {
@@ -44,6 +78,10 @@ const { assert, expect } = require("chai");
             client = accounts[1];
             contractor = accounts[2];
             attacker = accounts[3];
+
+            clientId = getRandomId()
+            contractorId = getRandomId()
+
             await deployments.fixture(["main"]);
 
             const usdcTokenInstance = await deployments.get("MockUsdc");
@@ -66,6 +104,12 @@ const { assert, expect } = require("chai");
 
             clientUsdc = usdcToken.connect(client);
             contractorUsdc = usdcToken.connect(contractor);
+
+            const usdcTransfer1 = await usdcToken.mint(client.address, USDC_START_BALANCE)
+            await usdcTransfer1.wait(1)
+
+            const usdcTransfer2 = await usdcToken.mint(contractor.address, USDC_START_BALANCE)
+            await usdcTransfer2.wait(1)
         });
 
         describe("Constructor Test", function () {
@@ -143,5 +187,126 @@ const { assert, expect } = require("chai");
                     assert.notEqual(arbiterAddr, 0x0000000000000000000000000000000000000000, "Arbiter address is not correct");
                 });
             });
+
+            describe("Create Order Test", () => {
+                let title = "I want to build a house"
+                let desc = "I want to construct a dream house"
+                let category = 0                // construction
+                let locality = "Agra"
+                let level = 1
+                let budget = 6969696969
+                let expectedStartDate = parseInt(Date.now() / 1000) + 100
+
+                beforeEach(async() => {
+                    await register(clientUR, mocksFunctions, clientId, CUSTOMER, "billa69")
+                    await register(contractorUR, mocksFunctions, contractorId, CONTRACTOR, "bhai me contractor hu")
+                })
+
+                it("Order Created and stored in ds", async() => {
+                    await expect(clientBB.createOrder(clientId, title, desc, category, locality, level, budget, expectedStartDate))
+                        .to.emit(builderBuddy, "OrderCreated")
+
+                    const counter = await clientBB.getOrderCounter()
+                    const data = await clientBB.getOrder(counter - 1)
+
+                    assert.equal(data.customer, client.address)
+                    assert.equal(data.customerId, clientId)
+                    assert.equal(data.title, title)
+                    assert.equal(data.description, desc)
+                    assert.equal(data.category, category)
+                    assert.equal(data.locality, locality)
+                    assert.equal(data.level, level)
+                    assert.equal(data.budget, budget)
+                    assert.equal(data.expectedStartDate, expectedStartDate)
+                    assert.equal(data.status, 0)
+                    assert.equal(data.contractor, 0x00)
+                    assert.equal(data.contractorId, 0x00)
+                    assert.equal(data.taskContract, 0)
+                })
+            })
+
+            describe("Confirm User Order Testing", () => {
+                let title = "I want to build a house"
+                let desc = "I want to construct a dream house"
+                let category = 0                // construction
+                let locality = "Agra"
+                let level = 1
+                let budget = 6969696969
+                let expectedStartDate = parseInt(Date.now() / 1000) + 100
+
+                beforeEach(async() => {
+                    // Register Customer
+                    await register(clientUR, mocksFunctions, clientId, CUSTOMER, "billa69")
+
+                    // Register Contractor
+                    await register(contractorUR, mocksFunctions, contractorId, CONTRACTOR, "bhai me contractor hu")
+
+                    // Contractor Stake USDC on Builder Buddy
+
+                    const approveResponse = await contractorUsdc.approve(builderBuddy.address, collaterals[level - 1])
+                    await approveResponse.wait(1)
+
+                    const stakeResponse = await contractorBB.incrementLevelAndStakeUSDC(contractorId, level)
+                    await stakeResponse.wait(1)
+                })
+
+                it("Customer places order, add contractor, contractor confirms order and task manager deployed", async() => {
+                    const contractorData = await contractorUR.contractors(contractorId)
+                    assert.equal(contractorData.level, level)
+                    assert.equal(contractorData.totalCollateralDeposited, collaterals[level - 1])
+                    
+
+                    // Customer Places Order
+                    const orderId = await clientBB.getOrderCounter()
+                    const orderResponse = await clientBB.createOrder(clientId, title, desc, category, locality, level, budget, expectedStartDate)
+                    await orderResponse.wait(1)
+
+
+                    // Assigns Contractor
+                    const assignContractorResponse = await clientBB.assignContractorToOrder(clientId, orderId, contractorId)
+                    await assignContractorResponse.wait(1)
+
+                    // Contractor Confirms Order
+                    await expect(contractorBB.confirmUserOrder(contractorId, orderId)).to.emit(builderBuddy, "OrderConfirmed")
+
+
+                    const orderData = await clientBB.getOrder(orderId)
+                    const taskContract = await orderData.taskContract
+
+                    // Asserts
+                    assert.equal(orderData.status, 1)
+                    assert.equal(orderData.contractor, contractor.address)
+                    assert.equal(orderData.contractorId, contractorId)
+                    assert.notEqual(taskContract, 0)
+
+                    console.log("Task Contract:", taskContract);
+
+                    const tm = await ethers.getContractAt("TaskManager", taskContract)
+
+                    const _orderId = await tm.getOrderId()
+                    const _clientId = await tm.getClientId()
+                    const _contractorId = await tm.getContractorId()
+                    const _client = await tm.getClientAddress()
+                    const _contractor = await tm.getContractorAddress()
+                    const _level = await tm.getLevel()
+                    const _usdcAddress = await tm.getUsdcToken()
+                    const _collDep = await tm.getCollateralDeposited()
+                    const _workFinished = await tm.isWorkFinished()
+                    const _builderBuddyAddr = await tm.getBuilderBuddyAddr()
+                    const taskCounter = await tm.getTaskCounter()
+
+                    assert.equal(_orderId.toString(), orderId)
+                    assert.equal(_clientId, clientId)
+                    assert.equal(_contractorId, contractorId)
+                    assert.equal(_client, client.address)
+                    assert.equal(_contractor, contractor.address)
+                    assert.equal(_level, level)
+                    assert.equal(_usdcAddress, usdcToken.address)
+                    assert.equal(_collDep.toString(), contractorData.totalCollateralDeposited)
+                    assert.equal(_workFinished, false)
+                    assert.equal(_builderBuddyAddr, builderBuddy.address)
+                    assert.equal(taskCounter, 0)
+                })
+            })
         });
   });
