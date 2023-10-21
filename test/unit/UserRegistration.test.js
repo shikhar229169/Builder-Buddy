@@ -104,5 +104,104 @@ const { V4MAPPED } = require("dns");
                 assert.equal(collateralDeposited, 0, "collateralDeposited does not match");
             });
         })
+
+        describe("getContractorAddr Testing", function () {
+          it("Should get contractor address", async function () {
+              let userId = "0x";
+              for (let i = 0; i < 24; i++) {
+                  let randomValue = Math.floor((Math.random() * 100) % 15);
+                  if (randomValue <= 9) {
+                      userId += String.fromCharCode(48 + randomValue);
+                  }
+                  else {
+                      userId += String.fromCharCode(97 + randomValue - 9); 
+                  }
+              }
+              let tx = await userRegistration.register( userId, 1, "Naman");
+              let receipt = await tx.wait();
+              let requestId = receipt.logs[0].topics[1];
+              await mocksFunctions.fulfillRequest(requestId);
+              let contractorAddress = await userRegistration.getContractorAddr(userId);
+              assert.equal(contractorAddress, deployer, "contractorAddress does not match");
+          }) 
+        });
+
+        describe("getCustomerAddr Testing", function () {
+          it("Should get customer address", async function () {
+            let userId = "0x";
+            for (let i = 0; i < 24; i++) {
+                let randomValue = Math.floor((Math.random() * 100) % 15);
+                if (randomValue <= 9) {
+                    userId += String.fromCharCode(48 + randomValue);
+                }
+                else {
+                    userId += String.fromCharCode(97 + randomValue - 9); 
+                }
+            }
+            let tx = await userRegistration.register( userId, 0, "Naman");
+            let receipt = await tx.wait();
+            let requestId = receipt.logs[0].topics[1];
+            await mocksFunctions.fulfillRequest(requestId);
+            let customerAddress = await userRegistration.getCustomerAddr(userId);
+            assert.equal(customerAddress, deployer, "customerAddress does not match");
+          });
+        });
+
+        describe("getContractorInfo Testing", function () {
+          it("Should get contractor info", async function () {
+              let userId = "0x";
+              for (let i = 0; i < 24; i++) {
+                  let randomValue = Math.floor((Math.random() * 100) % 15);
+                  if (randomValue <= 9) {
+                      userId += String.fromCharCode(48 + randomValue);
+                  }
+                  else {
+                      userId += String.fromCharCode(97 + randomValue - 9); 
+                  }
+              }
+              let tx = await userRegistration.register( userId, 1, "Naman");
+              let receipt = await tx.wait();
+              let requestId = receipt.logs[0].topics[1];
+              await mocksFunctions.fulfillRequest(requestId);
+              let contractorInfo = await userRegistration.getContractorInfo(userId);
+              assert.equal(contractorInfo.ethAddress, deployer, "contractorAddress does not match");
+              assert.equal(contractorInfo.name, "Naman", "name does not match");
+              assert.equal(contractorInfo.totalCollateralDeposited, 0, "totalCollateralDeposited does not match");
+              assert.equal(contractorInfo.isAssigned, false, "isAssigned does not match");
+              assert.equal(contractorInfo.level, 0, "level does not match");
+              assert.equal(contractorInfo.score, 0, "score does not match");
+          });
+        });
+
+        describe("getCustomerInfo Testing", function () {
+          it("Should get customer info", async function () {
+              let userId = "0x";
+              for (let i = 0; i < 24; i++) {
+                  let randomValue = Math.floor((Math.random() * 100) % 15);
+                  if (randomValue <= 9) {
+                      userId += String.fromCharCode(48 + randomValue);
+                  }
+                  else {
+                      userId += String.fromCharCode(97 + randomValue - 9); 
+                  }
+              }
+              let tx = await userRegistration.register( userId, 0, "Naman");
+              let receipt = await tx.wait();
+              let requestId = receipt.logs[0].topics[1];
+              await mocksFunctions.fulfillRequest(requestId);
+              let customerInfo = await userRegistration.getCustomerInfo(userId);
+              assert.equal(customerInfo.ethAddress, deployer, "customerAddress does not match");
+              assert.equal(customerInfo.name, "Naman", "name does not match");
+          });
+        });
+
+        describe("setSubId Testing", function () {
+          it("Should set subId", async function () {
+            let newSubId = 7;
+            await userRegistration.setSubId(newSubId);
+            let subId = await userRegistration.subscriptionId();
+            assert.equal(subId, newSubId, "subId does not match");
+          });
+        });
       })  
     });
