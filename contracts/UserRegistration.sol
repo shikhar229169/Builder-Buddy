@@ -73,6 +73,7 @@ contract UserRegistration is FunctionsClient {
     event Registered(bytes12 indexed userId, address indexed ethAddress, Role indexed role);
     event RegistrationUnsuccessful(address indexed ethAddress, uint256 indexed score);
     event AlreadyRegistered(bytes12 indexed userId, address indexed ethAddress);
+    event RegistrationRequestSent(bytes32 indexed reqId);
     
     modifier onlyOwner() {
         if (msg.sender != owner) {
@@ -135,6 +136,8 @@ contract UserRegistration is FunctionsClient {
 
         bytes32 reqId = _sendRequest(req.encodeCBOR(), subscriptionId, gasLimit, donId);
         reqIdToUserInfo[reqId] = UserRequestInfo(userId, msg.sender, role, name);
+
+        emit RegistrationRequestSent(reqId);
     }
 
 
