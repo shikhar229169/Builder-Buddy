@@ -51,7 +51,7 @@ async function register(userRegistration, functionsMock, userId, role, name) {
         let attackerId
 
         let attacker;
-        
+
         let clientBB;
         let contractorBB;
         let attackerBB;
@@ -435,9 +435,120 @@ async function register(userRegistration, functionsMock, userId, role, name) {
                 });
             });
 
-            // describe("confirm User Order Test", () => {
+            describe("Confirm User Order Test", () => {
+                beforeEach(async() => {
+                    await register(clientUR, mocksFunctions, clientId, CUSTOMER, "billa69");
+                    
+                    let title = "I want to build a house"
+                    let desc = "I want to construct a dream house"
+                    let category = 0                // construction
+                    let locality = "Agra"
+                    let level = 1
+                    let budget = 6969696969
+                    let expectedStartDate = parseInt(Date.now() / 1000) + 100
+                    await clientBB.createOrder(clientId, title, desc, category, locality, level, budget, expectedStartDate);
+
+                    await register(contractorUR, mocksFunctions, contractorId, CONTRACTOR, "bhai me contractor hu");
+                });
+                it("reverts if contractor is not registered", async() => {
+                    await expect(attackerBB.confirmUserOrder(attackerId, 0))
+                        .to.be.revertedWithCustomError(builderBuddy, "BuilderBuddy__InvalidContractor");
+                });
+
+                it("contractor has confirmed user order and store in data structure", async() => {
+                    let level = 1;
+                    const approveResponse = await contractorUsdc.approve(builderBuddy.address, collaterals[level])
+                    await approveResponse.wait(1)
+
+                    const stakeResponse = await contractorBB.incrementLevelAndStakeUSDC(contractorId, 1);
+                    await stakeResponse.wait(1)
+
+                    const assignContractor = await clientBB.assignContractorToOrder(clientId, 0, contractorId);
+                    await assignContractor.wait(1)
+                    
+                    await expect(contractorBB.confirmUserOrder(contractorId, 0)).to.emit(builderBuddy, "OrderConfirmed").withArgs(0, contractor.address);
+                    
+                    let orderData = await clientBB.getOrder(0);
+                    assert.equal(orderData.status, 1);
+                    assert.notEqual(orderData.taskContract, 0x00);
+                    assert.equal(orderData.contractor, contractor.address);
+                });
+    
+                it("reverts if order is already set", async() => {
+                    let level = 1;
+                    const approveResponse = await contractorUsdc.approve(builderBuddy.address, collaterals[level])
+                    await approveResponse.wait(1)
+
+                    const stakeResponse = await contractorBB.incrementLevelAndStakeUSDC(contractorId, 1);
+                    await stakeResponse.wait(1)
+
+                    const assignContractor = await clientBB.assignContractorToOrder(clientId, 0, contractorId);
+                    await assignContractor.wait(1)
+                    
+                    await contractorBB.confirmUserOrder(contractorId, 0);
+                    
+                    await expect(contractorBB.confirmUserOrder(contractorId, 0))
+                        .to.be.revertedWithCustomError(builderBuddy, "BuilderBuddy__ContractorAlreadySet");
+                });
+            });
+            
+            describe("cancel Order Test", () => {
+                beforeEach(async() => {
+                    await register(clientUR, mocksFunctions, clientId, CUSTOMER, "billa69");
+                    
+                    let title = "I want to build a house"
+                    let desc = "I want to construct a dream house"
+                    let category = 0                // construction
+                    let locality = "Agra"
+                    let level = 1
+                    let budget = 6969696969
+                    let expectedStartDate = parseInt(Date.now() / 1000) + 100
+                    await clientBB.createOrder(clientId, title, desc, category, locality, level, budget, expectedStartDate);
+
+                    await register(contractorUR, mocksFunctions, contractorId, CONTRACTOR, "bhai me contractor hu");
+                    
+                    const approveResponse = await contractorUsdc.approve(builderBuddy.address, collaterals[level])
+                    await approveResponse.wait(1)
+
+                    const stakeResponse = await contractorBB.incrementLevelAndStakeUSDC(contractorId, 1);
+                    await stakeResponse.wait(1)
+                }); 
+                it("revert if caller is not client", async() => {
+
+                    await expect(attackerBB.cancelOrder(clientId, 0))
+                        .to.be.revertedWithCustomError(builderBuddy, "BuilderBuddy__InvalidCustomer");
+                });
+
+                it("revert if order is not assigned to contractor", async() => {
+
+                    await expect(clientBB.cancelOrder(clientId, 1))
+                        .to.be.revertedWithCustomError(builderBuddy, "BuilderBuddy__OrderNotFound");
+                });
+
+                it("revert if order is already cancelled", async() => {
+                    const assignContractor = await clientBB.assignContractorToOrder(clientId, 0, contractorId);
+                    await assignContractor.wait(1)
+                    
+                    await contractorBB.confirmUserOrder(contractorId, 0);
+
+                    await expect(clientBB.cancelOrder(clientId, 0))
+                        .to.be.revertedWithCustomError(builderBuddy, "BuilderBuddy__OrderCantBeCancelled");
+                });
                 
-            // })
+                it("cancel order and store in data structure", async() => {
+                    await clientBB.cancelOrder(clientId, 0);
+
+                    let orderData = await clientBB.getOrder(0);
+                    
+                    assert.equal(orderData.status, 2);
+                    assert.equal(orderData.contractor, 0x00);
+                    assert.equal(orderData.contractorId, 0x00);
+                });
+                
+                it("checking events emitting of cancel order", async() => {
+                    await expect(clientBB.cancelOrder(clientId, 0)).to.emit(builderBuddy, "OrderCancelled").withArgs(0);
+                });
+            });
 
             describe("getRequiredCollateral Test", function () {
                 it("Should give correct collateral", async function () {
