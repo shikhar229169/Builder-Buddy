@@ -4,8 +4,6 @@ const {
   localNetworks,
 } = require("../../helper-hardhat-config.js");
 const { assert, expect } = require("chai");
-const {} = require("@nomicfoundation/hardhat-toolbox");
-const { V4MAPPED } = require("dns");
 
 !localNetworks.includes(network.name)
   ? describe.skip
@@ -201,6 +199,24 @@ const { V4MAPPED } = require("dns");
             await userRegistration.setSubId(newSubId);
             let subId = await userRegistration.subscriptionId();
             assert.equal(subId, newSubId, "subId does not match");
+          });
+        });
+
+        describe("setSecrets Testing", function () {
+          it("Should set secrets", async function () {
+            let newSecrets = "0x";
+            for (let i = 0; i < 64; i++) {
+                let randomValue = Math.floor((Math.random() * 100) % 15);
+                if (randomValue <= 9) {
+                    newSecrets += String.fromCharCode(48 + randomValue);
+                }
+                else {
+                    newSecrets += String.fromCharCode(97 + randomValue - 9); 
+                }
+            }
+            await userRegistration.setSecrets(newSecrets);
+            let secrets = await userRegistration.secrets();
+            assert.equal(secrets, newSecrets, "secrets does not match");
           });
         });
       })  
