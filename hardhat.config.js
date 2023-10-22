@@ -5,6 +5,7 @@ require("dotenv").config()
 const MUMBAI_RPC_URL = process.env.MUMBAI_RPC_URL
 const PRIVATE_KEY = process.env.PRIVATE_KEY
 const MUMBAI_API_KEY = process.env.MUMBAI_API_KEY
+const SECOND_PRIVATE_KEY = process.env.SECOND_PRIVATE_KEY
 
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
@@ -27,7 +28,7 @@ module.exports = {
     mumbai: {
       url: MUMBAI_RPC_URL,
       chainId: 80001,
-      accounts: PRIVATE_KEY !== undefined ? [PRIVATE_KEY] : [],
+      accounts: PRIVATE_KEY !== undefined ? [PRIVATE_KEY, SECOND_PRIVATE_KEY] : [],
       blockConfirmations: 3
     }
   },
@@ -43,6 +44,6 @@ module.exports = {
   },
 
   mocha: {
-    timeout: 300000
+    timeout: 1000000
   }
 };
