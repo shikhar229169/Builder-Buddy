@@ -278,7 +278,7 @@ contract BuilderBuddy {
         uint8 _level,
         uint256 budget,
         uint256 expectedStartDate
-    ) external onlyCustomer(userId) {
+    ) external onlyCustomer(userId) returns (uint256) {
         if (_level <= 0 || _level > TOTAL_LEVELS) {
             revert BuilderBuddy__InvalidLevel();
         }
@@ -310,6 +310,8 @@ contract BuilderBuddy {
         customerOrders[userId].push(orderId);
 
         emit OrderCreated(msg.sender, orderId, title);
+
+        return orderId;
     }
 
     /**

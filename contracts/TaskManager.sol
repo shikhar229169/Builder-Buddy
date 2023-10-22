@@ -459,7 +459,7 @@ contract TaskManager {
         emit ArbiterAdded(arbiter);
     }
 
-    function resolveDisputeFavourClient(string memory remarks, uint256 amtToRefund) external isActive {
+    function resolveDispute(string memory remarks, uint256 amtToRefund) external isActive {
         if (msg.sender != arbiterAssigned) {
             revert TaskManager__OnlyArbiterCanResolveDisputes();
         }
