@@ -658,4 +658,12 @@ contract TaskManager {
     function getBuilderBuddyAddr() external view returns (address) {
         return address(builderBuddy);
     }
+
+    function getArbiterContractAddr() external view returns (address) {
+        return address(arbiterContract);
+    }
+
+    function getTaskRating(uint256 taskId) external view returns (uint256) {
+        return taskRating[taskId];
+    }
 }
