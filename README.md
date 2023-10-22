@@ -152,7 +152,7 @@ function createOrder(
 - locality - Locality of order
 - _level - Level of order (1 to 5)
 - budget - Budget of order
-- expectedStartDate - Expected start date of order
+- expectedStartDate - Expected start date of order in unix timestamp in seconds (should be greater than current time) 
 
 
 ### 2. Assign Contractor To Order
