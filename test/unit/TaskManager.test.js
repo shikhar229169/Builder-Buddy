@@ -191,15 +191,27 @@ async function register(userRegistration, functionsMock, userId, role, name) {
             assert.equal(taskData[2].toString(), 1000000, "Budget is not correct")
             assert.equal(taskData[3], 3, "Status is not correct")
         });
+
+        it("reverts if not called by contractor", async function () {
+            await expect(clientTM.addTask("Title", "Description", 1000000)).to.be.revertedWithCustomError(taskManager, "TaskManager__NotContractor")
+        });
+
+        it("reverts if previous task is not finished", async function () {
+            await contractorTM.addTask("Title", "Description", 1000000)
+            await expect(contractorTM.addTask("Title", "Description", 1000000)).to.be.revertedWithCustomError(taskManager, "TaskManager__PreviousTaskNotFinished")
+        });
+
+        it("reverts if budget is greater than 80 % collateral deposited", async function () {
+            await expect(contractorTM.addTask("Title", "Description", 1700000)).to.be.revertedWithCustomError(taskManager, "TaskManager__CostGreaterThanCollateral")
+        });
     });
     
     describe("approve Task Tests", function () {
-        beforeEach(async () => {
-            await contractorTM.addTask("Title", "Description", 1000000);
-        });
         it("Should approve task correctly and store in data structure", async function () {
             let taskCounter = 1;
             const APPROVED = 1;
+            await contractorTM.addTask("Title", "Description", 1000000);
+
             await usdcToken.mint(taskManager.address, 1000000);
             await expect(clientTM.approveTask()).to.emit(taskManager, "TaskApproved").withArgs(taskCounter, "Title", "Approved");
             
@@ -210,15 +222,39 @@ async function register(userRegistration, functionsMock, userId, role, name) {
             assert.equal(taskData[2].toString(), 1000000, "Budget is not correct")
             assert.equal(taskData[3], APPROVED, "Status is not correct")
         });
-    });
 
-    describe("Avail Cost Tests", function () {
-        beforeEach(async () => {
+        it("reverts if not called by client", async function () {
+            await contractorTM.addTask("Title", "Description", 1000000);
+            await usdcToken.mint(taskManager.address, 1000000);
+
+            await expect(contractorTM.approveTask()).to.be.revertedWithCustomError(taskManager, "TaskManager__NotClient")
+        });
+
+        it("reverts if task is not added", async function () {
+            await usdcToken.mint(taskManager.address, 1000000);
+            await expect(clientTM.approveTask()).to.be.revertedWithCustomError(taskManager, "TaskManager__NoTasksYet")
+        });
+
+        it("reverts if budget is not transferred", async function () {
+            await contractorTM.addTask("Title", "Description", 1000000);
+            await expect(clientTM.approveTask()).to.be.revertedWithCustomError(taskManager, "TaskManager__InsufficientFundsForTask")
+        });
+
+        it("reverts if task status is not Initiated", async function () {
             await contractorTM.addTask("Title", "Description", 1000000);
             await usdcToken.mint(taskManager.address, 1000000);
             await clientTM.approveTask();
+
+            await expect(clientTM.approveTask()).to.be.revertedWithCustomError(taskManager, "TaskManager__NotInitiated")
         });
+    });
+
+    describe("Avail Cost Tests", function () {
         it("Should avail cost correctly", async function () {
+            await contractorTM.addTask("Title", "Description", 1000000);
+            await usdcToken.mint(taskManager.address, 1000000);
+            await clientTM.approveTask();
+
             let taskCounter = 1;
             await expect(contractorTM.availCost()).to.emit(taskManager, "AmountTransferred").withArgs(taskCounter, 1000000, "Pending");
             
@@ -228,6 +264,25 @@ async function register(userRegistration, functionsMock, userId, role, name) {
             assert.equal(taskData[1], "Description", "Description is not correct")
             assert.equal(taskData[2].toString(), 1000000, "Budget is not correct")
             assert.equal(taskData[3], 0, "Status is not correct")
+        });
+
+        it("reverts if not called by contractor", async function () {
+            await contractorTM.addTask("Title", "Description", 1000000);
+            await usdcToken.mint(taskManager.address, 1000000);
+            await clientTM.approveTask();
+            
+            await expect(clientTM.availCost()).to.be.revertedWithCustomError(taskManager, "TaskManager__NotContractor")
+        });
+
+        it("reverts if task is not added", async function () {
+            await expect(contractorTM.availCost()).to.be.revertedWithCustomError(taskManager, "TaskManager__NoTasksYet")
+        });
+
+        it("reverts if task status is not Approved", async function () {
+            await contractorTM.addTask("Title", "Description", 1000000);
+            await usdcToken.mint(taskManager.address, 1000000);
+
+            await expect(contractorTM.availCost()).to.be.revertedWithCustomError(taskManager, "TaskManager__NotApproved")
         });
     });
 
@@ -252,6 +307,28 @@ async function register(userRegistration, functionsMock, userId, role, name) {
             assert.equal(taskVersionCounter, 0, "Task version counter is not correct")
             assert.equal(taskRating, rating, "Rating is not correct")
         });
+
+        it("reverts if not called by client", async function () {
+            await expect(contractorTM.finishTask(8)).to.be.revertedWithCustomError(taskManager, "TaskManager__NotClient")
+        });
+
+        it("revets if task is not Pending", async function () {
+            let rating = 8;
+            await clientTM.finishTask(rating)
+
+            await expect(clientTM.finishTask(rating)).to.be.revertedWithCustomError(taskManager, "TaskManager__NotPending")
+        });
+
+        it("reverts if rating is not between 0 and 10", async function () {
+            let rating = 11;
+            await expect(clientTM.finishTask(rating)).to.be.revertedWithCustomError(taskManager, "TaskManager__RatingNotInRange")
+        });
+    });
+
+    describe("revert if task is not add and try to finish Tests", function () {
+        it("Should revert if task is not add and try to finish", async function () {
+            await expect(clientTM.finishTask(8)).to.be.revertedWithCustomError(taskManager, "TaskManager__NoTasksYet")
+        });
     });
 
     describe("Finish Work Tests", function () {
@@ -260,9 +337,10 @@ async function register(userRegistration, functionsMock, userId, role, name) {
             await usdcToken.mint(taskManager.address, 1000000);
             await clientTM.approveTask();
             await contractorTM.availCost();
-            await clientTM.finishTask(8);
         });
         it("Should finish work correctly", async function () {
+            await clientTM.finishTask(8);
+
             await expect(clientTM.finishWork()).to.emit(taskManager, "WorkFinished");
 
             let _isContractActive = !(await taskManager.isWorkFinished());
@@ -275,17 +353,34 @@ async function register(userRegistration, functionsMock, userId, role, name) {
             overallRating = (overallRating * 100) / taskCounter;
             let orderId = await taskManager.getOrderId()
             const orderData = await clientBB.getOrder(orderId)
+
             assert.equal(_isContractActive, false,"Contract is not active")
             assert.equal(overallRating / 1e9, 800,"Overall rating is not correct")
             assert.equal(orderData.status, FINISHED, "Order status is not correct")
         });
+
+        it("reverts if not called by client", async function () {
+            await clientTM.finishTask(8);
+
+            await expect(contractorTM.finishWork()).to.be.revertedWithCustomError(taskManager, "TaskManager__NotClient")
+        });
+
+        it("reverts if task is not Finished", async function () {
+            await expect(clientTM.finishWork()).to.be.revertedWithCustomError(taskManager, "TaskManager__PreviousTaskNotFinished")
+        });
+
+        it("reverts if task is not active", async function () {
+            await clientTM.finishTask(8);
+            await clientTM.finishWork();
+
+            await expect(clientTM.finishWork()).to.be.revertedWithCustomError(taskManager, "TaskManager__ContractNotActive")
+        });
     });
 
     describe("reject Task Tests", function () {
-        beforeEach(async () => {
-            await contractorTM.addTask("Title", "Description", 1000000);
-        });
         it("Should reject task correctly", async function () {
+            await contractorTM.addTask("Title", "Description", 1000000);
+
             let rejectCounter = 1;
             let taskCounter = 1;
             let REJECTED = 4;
@@ -294,10 +389,201 @@ async function register(userRegistration, functionsMock, userId, role, name) {
             const taskData = await clientTM.getTask(taskCounter)
             let rejectedTaskCounter = await clientTM.getRejectedTaskCounter()
             const newtaskCounter = await clientTM.getTaskCounter()
+            const allRejectedTasks = await clientTM.getAllRejectedTasks()
             
+            assert.equal(allRejectedTasks[0][0], taskData[0], "Title is not correct")
+            assert.equal(allRejectedTasks[0][1], taskData[1], "Description is not correct")
+            assert.equal(allRejectedTasks[0][2].toString(), taskData[2].toString(), "Budget is not correct")
+            assert.equal(allRejectedTasks[0][3], taskData[3], "Status is not correct")
             assert.equal(taskData[3], REJECTED, "Status is not REJECTED")
             assert.equal(rejectedTaskCounter, rejectCounter, "Rejected task counter is not correct")
             assert.equal(newtaskCounter, taskCounter - 1, "Task counter is not correct")
+        });
+
+        it("reverts if not called by client", async function () {
+            await expect(contractorTM.rejectTask()).to.be.revertedWithCustomError(taskManager, "TaskManager__NotClient")
+        });
+
+        it("reverts if task is not added", async function () {
+            await expect(clientTM.rejectTask()).to.be.revertedWithCustomError(taskManager, "TaskManager__NoTasksYet")
+        });
+
+        it("reverts if task status is not Initiated", async function () {
+            await contractorTM.addTask("Title", "Description", 1000000);
+            await usdcToken.mint(taskManager.address, 1000000);
+            await clientTM.approveTask();
+
+            await expect(clientTM.rejectTask()).to.be.revertedWithCustomError(taskManager, "TaskManager__NotInitiated")
+        });
+    });
+
+    describe("get Order Id Tests", function () {
+        it("Should return correct order id", async function () {
+            let _orderId = await taskManager.getOrderId()
+
+            assert.equal(_orderId.toString(),orderId, "Order Id is not correct")
+        });
+    });
+
+    describe("get Level Tests", function () {
+        it("Should return correct level of contractor", async function () {
+            let contractorLevel = await taskManager.getLevel()
+
+            assert.equal(contractorLevel, level, "contractor level is not correct")
+        });
+    });
+
+    describe("get Client Id Tests", function () {
+        it("Should return correct client id", async function () {
+            let _clientId = await taskManager.getClientId()
+
+            assert.equal(_clientId, clientId, "Client Id is not correct")
+        });
+    });
+
+    describe("get Contractor Id Tests", function () {
+        it("Should return correct contractor id", async function () {
+            let _contractorId = await taskManager.getContractorId()
+
+            assert.equal(_contractorId, contractorId, "Contractor Id is not correct")
+        });
+    });
+
+    describe("get Client Address Tests", function () {
+        it("Should return correct client address", async function () {
+            let _clientAddress = await taskManager.getClientAddress()
+
+            assert.equal(_clientAddress, client.address, "Client Address is not correct")
+        });
+    });
+
+    describe("get Contractor Address Tests", function () {
+        it("Should return correct contractor address", async function () {
+            let _contractorAddress = await taskManager.getContractorAddress()
+
+            assert.equal(_contractorAddress, contractor.address, "Contractor Address is not correct")
+        });
+    });
+
+    describe("get Collateral Deposited Tests", function () {
+        it("Should return correct collateral deposited", async function () {
+            let _collateralDeposited = await taskManager.getCollateralDeposited()
+
+            assert.equal(_collateralDeposited.toString(), collaterals[level - 1], "Collateral deposited is not correct")
+        });
+    });
+
+    describe("get USDC Token Tests", function () {
+        it("Should return correct USDC token address", async function () {
+            let _usdc = await taskManager.getUsdcToken()
+
+            assert.equal(_usdc, usdcToken.address, "USDC address is not correct")
+        });
+    });
+
+    describe("get Task Counter Tests", function () {
+        it("Should return correct task counter", async function () {
+            await contractorTM.addTask("Title", "Description", 1000000);
+            let _taskCounter = await taskManager.getTaskCounter()
+
+            assert.equal(_taskCounter, 1, "Task counter is not correct")
+        });
+    });
+
+    describe("get Rejected Task Counter Tests", function () {
+        it("Should return correct rejected task counter", async function () {
+            await contractorTM.addTask("Title", "Description", 1000000);
+            await clientTM.rejectTask()
+            let _rejectedTaskCounter = await taskManager.getRejectedTaskCounter()
+
+            assert.equal(_rejectedTaskCounter, 1, "Rejected task counter is not correct")
+        });
+    });
+
+    describe("get Task Version Counter Tests", function () {
+        it("Should return correct task version counter", async function () {
+            await contractorTM.addTask("Title", "Description", 1000000);
+            let _taskVersionCounter = await taskManager.getTaskVersionCounter()
+
+            assert.equal(_taskVersionCounter, 1, "Task version counter is not correct")
+        });
+    });
+
+    describe("get Task Tests", function () {
+        it("Should return correct task data", async function () {
+            await contractorTM.addTask("Title", "Description", 1000000);
+            let taskCounter = 1;
+            let taskData = await clientTM.getTask(taskCounter)
+
+            assert.equal(taskData[0], "Title", "Title is not correct")
+            assert.equal(taskData[1], "Description", "Description is not correct")
+            assert.equal(taskData[2].toString(), 1000000, "Budget is not correct")
+            assert.equal(taskData[3], 3, "Status is not correct")
+        });
+    });
+
+    describe("get All Tasks Tests", function () {
+        it("Should return correct task data", async function () {
+            await contractorTM.addTask("Title", "Description", 1000000);
+            let taskData = await clientTM.getAllTasks()
+            let INITIATED = 3;
+
+            assert.equal(taskData[0][0], "Title", "Title is not correct")
+            assert.equal(taskData[0][1], "Description", "Description is not correct")
+            assert.equal(taskData[0][2].toString(), 1000000, "Budget is not correct")
+            assert.equal(taskData[0][3], INITIATED, "Status is not correct")
+        });
+    });
+
+    describe("get All Rejected Tasks Tests", function () {
+        it("Should return correct task data", async function () {
+            await contractorTM.addTask("Title", "Description", 1000000);
+            await clientTM.rejectTask()
+
+            let REJECTED = 4;
+            let rejectedTaskData = await clientTM.getAllRejectedTasks()
+
+            assert.equal(rejectedTaskData[0][0], "Title", "Title is not correct")
+            assert.equal(rejectedTaskData[0][1], "Description", "Description is not correct")
+            assert.equal(rejectedTaskData[0][2].toString(), 1000000, "Budget is not correct")
+            assert.equal(rejectedTaskData[0][3], REJECTED, "Status is not correct")
+        });
+    });
+
+    describe("isWorkFinished Tests", function () {
+        it("Should return correct work status", async function () {
+            let _isWorkFinished = await taskManager.isWorkFinished()
+            assert.equal(_isWorkFinished, false, "Work status is not correct")
+        });
+    });
+
+    describe("get Builder Buddy Address Tests", function () {
+        it("Should return correct Builder Buddy address", async function () {
+            let _builderBuddy = await taskManager.getBuilderBuddyAddr()
+
+            assert.equal(_builderBuddy, builderBuddy.address, "BuilderBuddy address is not correct")
+        });
+    });
+
+    describe("get Arbiter Contract Address Tests", function () {
+        it("Should return correct Arbiter Contract address", async function () {
+            const arbiterContract = await builderBuddy.getArbiterContract()
+            let _arbiterContract = await taskManager.getArbiterContractAddr()
+
+            assert.equal(_arbiterContract, arbiterContract, "Arbiter contract address is not correct")
+        });
+    });
+
+    describe("get Task Rating Tests", function () {
+        it("Should return correct task rating", async function () {
+            await contractorTM.addTask("Title", "Description", 1000000);
+            await usdcToken.mint(taskManager.address, 1000000);
+            await clientTM.approveTask();
+            await contractorTM.availCost();
+            await clientTM.finishTask(8);
+
+            let _taskRating = await clientTM.getTaskRating(1)
+            assert.equal(_taskRating, 8, "Task rating is not correct")
         });
     });
   });
