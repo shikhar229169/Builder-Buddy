@@ -74,6 +74,7 @@ contract BuilderBuddy {
     error BuilderBuddy__OrderNotFound();
     error BuilderBuddy__TokenTransferFailed();
     error BuilderBuddy__OrderCantBeCancelled();
+    error BuilderBuddy__CantWithdrawContractorAssigned();
 
     // State Variables
     uint256 private orderCounter;
@@ -130,6 +131,7 @@ contract BuilderBuddy {
         if (contr.level == 0) {
             revert BuilderBuddy__ContractorHasNotStaked();
         }
+
         if (levelRequirements[contr.level].collateralRequired != contr.totalCollateralDeposited) {
             revert BuilderBuddy__ContractorHasNotStaked();
         }
@@ -239,10 +241,13 @@ contract BuilderBuddy {
     )
         external
         onlyContractor(contractorUserId)
-        isContractorValid(contractorUserId)
     {
         UserRegistration.Contractor memory cont = i_userReg.getContractorInfo(contractorUserId);
         uint8 currLevel = cont.level;
+
+        if (cont.isAssigned) {
+            revert BuilderBuddy__CantWithdrawContractorAssigned();
+        }
 
         if (_level >= currLevel) {
             revert BuilderBuddy__YouCantUpgrade();
