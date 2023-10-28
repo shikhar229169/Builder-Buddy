@@ -31,6 +31,15 @@ async function register(userRegistration, functionsMock, userId, role, name) {
     const fulfillReceipt = await fulfillResponse.wait(1)
 }
 
+async function taskLifeCycle(taskManager, client, contractor, usdcClient, collateral) {
+    const cost = (70 * collateral) / 100;
+    await taskManager.connect(contractor).addTask("title", "desc", cost)
+    await usdcClient.transfer(taskManager.address, cost)
+    await taskManager.connect(client).approveTask()
+    await taskManager.connect(contractor).availCost()
+    await taskManager.connect(client).finishTask(10)
+}
+
 !localNetworks.includes(network.name)
   ? describe.skip
   : describe("BuilderBuddy Tests", function () {
@@ -65,7 +74,7 @@ async function register(userRegistration, functionsMock, userId, role, name) {
         const CUSTOMER = 0
         const CONTRACTOR = 1
 
-        const USDC_START_BALANCE = 1e9
+        const USDC_START_BALANCE = 1e9                 // 1000 USDC (as there are 6 decimals in USDC token)
         let collaterals = [2, 3, 4, 5, 6];
         let decimals = constructorData.decimals;
         for (let i in collaterals) {
@@ -559,4 +568,68 @@ async function register(userRegistration, functionsMock, userId, role, name) {
                 });
             });
         });
+
+        describe("Contractor Unstaking Tests", () => {
+            let orderId 
+            const title = "I want to build a house"
+            const desc = "I want to construct a dream house"
+            const category = 0                // construction
+            const locality = "Agra"
+            const orderLevel = 1
+            const budget = 6969696969
+            const expectedStartDate = parseInt(Date.now() / 1000) + 100
+
+            beforeEach(async() => {
+                // get the contractor and user registered
+                const customerName = "billa69"
+                const contractorName = "contractor69"
+                await register(clientUR, mocksFunctions, clientId, CUSTOMER, customerName)
+                await register(contractorUR, mocksFunctions, contractorId, CONTRACTOR, contractorName)
+
+                // contractor stakes
+                const level = 1
+                await contractorUsdc.approve(builderBuddy.address, collaterals[level - 1])
+                await contractorBB.incrementLevelAndStakeUSDC(contractorId, level)
+
+                // customer places order, assigns to contractor and contractor confirms it
+                orderId = await builderBuddy.getOrderCounter()
+                await clientBB.createOrder(clientId, title, desc, category, locality, orderLevel, budget, expectedStartDate)
+                await clientBB.assignContractorToOrder(clientId, orderId, contractorId)
+                await contractorBB.confirmUserOrder(contractorId, orderId)
+            })
+
+            it("Reverts if contractor tries to withdraw if he is assigned to work", async() => {
+                const newLevel = 0
+                await expect(contractorBB.withdrawStakedUSDC(contractorId, newLevel)).to.be.revertedWithCustomError(builderBuddy, "BuilderBuddy__ContractorAlreadySet")
+            })
+
+            it("Allows contractor to withdraw if the order is completed and marked as finished", async() => {
+                const taskManagerAddr = await builderBuddy.getTaskContract(orderId)
+                
+                const taskManager = await ethers.getContractAt("TaskManager", taskManagerAddr)
+
+                const level = 1      // the level of contractor
+                await taskLifeCycle(taskManager, client, contractor, clientUsdc, collaterals[level - 1])
+
+                await taskManager.connect(client).finishWork()
+
+                
+                const initBuilderBuddyUsdcBalance = await usdcToken.balanceOf(builderBuddy.address)
+                const initContractorUsdcBalance = await usdcToken.balanceOf(contractor.address)
+                
+                const zeroLevel = 0
+                const collateralWithdrawn = collaterals[level - 1]
+                await expect(contractorBB.withdrawStakedUSDC(contractorId, zeroLevel)).to.emit(builderBuddy, "ContractorUnstaked").withArgs(contractor.address)
+
+                // Asserts
+                const contractorInfo = await contractorUR.getContractorInfo(contractorId)
+                const finalBuilderBuddyUsdcBalance = await usdcToken.balanceOf(builderBuddy.address)
+                const finalContractorUsdcBalance = await usdcToken.balanceOf(contractor.address)
+                assert.equal(contractorInfo.totalCollateralDeposited, 0)
+                assert.equal(contractorInfo.level, zeroLevel)
+                assert.equal(finalContractorUsdcBalance.toString(), initContractorUsdcBalance.add(collateralWithdrawn).toString())
+                assert.equal(finalBuilderBuddyUsdcBalance.toString(), initBuilderBuddyUsdcBalance.sub(collateralWithdrawn).toString())
+                assert.equal(finalBuilderBuddyUsdcBalance, 0)
+            })
+        })
   });
