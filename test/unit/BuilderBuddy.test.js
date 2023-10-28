@@ -600,7 +600,7 @@ async function taskLifeCycle(taskManager, client, contractor, usdcClient, collat
 
             it("Reverts if contractor tries to withdraw if he is assigned to work", async() => {
                 const newLevel = 0
-                await expect(contractorBB.withdrawStakedUSDC(contractorId, newLevel)).to.be.revertedWithCustomError(builderBuddy, "BuilderBuddy__ContractorAlreadySet")
+                await expect(contractorBB.withdrawStakedUSDC(contractorId, newLevel)).to.be.revertedWithCustomError(builderBuddy, "BuilderBuddy__CantWithdrawContractorAssigned")
             })
 
             it("Allows contractor to withdraw if the order is completed and marked as finished", async() => {
