@@ -407,7 +407,6 @@ contract BuilderBuddy {
 
         orders[orderId].status = Status.ASSIGNED;
 
-        i_userReg.setContractorAssignStatus(contractorUserId, true);
         contractorAcceptedOrders[contractorUserId].push(orderId);
 
         // deploy the task contract
@@ -416,6 +415,7 @@ contract BuilderBuddy {
         // update the task contract address
         orders[orderId].taskContract = address(taskManager);
 
+        i_userReg.setContractorAssignStatus(contractorUserId, true);
         emit OrderConfirmed(orderId, msg.sender);
     }
 
