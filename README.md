@@ -1,6 +1,3 @@
-#### Frontend - https://github.com/workers-contractors-users-link/FrontEnd
-#### Backend - https://github.com/workers-contractors-users-link/BackEnd
-
 ## Sample Contracts Deployed on Polygon Mumbai
 - UserRegistration - 0x7706dB18C4d446e3F11B0A64371C30511b055427
 - BuilderBuddy - 0xA2810D43556A8cB6692DE836627e7F78BF498Ebe
